@@ -1,0 +1,114 @@
+# Frontend Agent Notes
+
+This file describes the current frontend codebase in `frontend/` so future work starts from the actual implementation that exists today.
+
+## Current state
+
+- This is a standalone Next.js app using the App Router.
+- It is currently a frontend-only demo with no backend integration.
+- The root page renders a single interactive kanban board.
+- Board state is entirely local React state in the browser.
+- The UI already follows the project color palette and has custom typography.
+
+## Tooling
+
+- Framework: Next.js 16
+- React: 19
+- Styling: Tailwind CSS v4 plus CSS variables in `src/app/globals.css`
+- Drag and drop: `@dnd-kit/core` and `@dnd-kit/sortable`
+- Unit/component tests: Vitest + Testing Library
+- End-to-end tests: Playwright
+
+## Important files
+
+- `src/app/page.tsx`
+  - Renders the `KanbanBoard` component at `/`.
+- `src/app/layout.tsx`
+  - Defines metadata and loads Google fonts.
+- `src/app/globals.css`
+  - Defines project color tokens and global styles.
+- `src/components/KanbanBoard.tsx`
+  - Main client component.
+  - Holds board state in `useState`.
+  - Handles drag start/end, column rename, add card, and delete card.
+- `src/components/KanbanColumn.tsx`
+  - Renders a single column.
+  - Supports inline column renaming.
+  - Configures the droppable area and card list.
+- `src/components/KanbanCard.tsx`
+  - Renders a draggable card and delete action.
+- `src/components/KanbanCardPreview.tsx`
+  - Renders the drag overlay preview.
+- `src/components/NewCardForm.tsx`
+  - Handles add-card form open/close and submission.
+- `src/lib/kanban.ts`
+  - Defines `Card`, `Column`, and `BoardData`.
+  - Contains the demo board seed data.
+  - Contains card move logic and id generation.
+- `src/components/KanbanBoard.test.tsx`
+  - Covers rendering, renaming a column, and adding/removing a card.
+- `src/lib/kanban.test.ts`
+  - Covers board utility logic.
+- `tests/kanban.spec.ts`
+  - Covers page load, add-card, and drag-and-drop behavior in Playwright.
+
+## Current board model
+
+The current frontend data shape is:
+
+```ts
+type Card = {
+  id: string;
+  title: string;
+  details: string;
+};
+
+type Column = {
+  id: string;
+  title: string;
+  cardIds: string[];
+};
+
+type BoardData = {
+  columns: Column[];
+  cards: Record<string, Card>;
+};
+```
+
+This shape should be treated as the baseline for backend persistence unless there is a deliberate migration.
+
+## Current behavior
+
+- The board has five columns seeded from `initialData`.
+- Column titles are editable inline.
+- Cards can be dragged within a column or across columns.
+- Cards can be added from the bottom of each column.
+- Cards can be removed from a column.
+- There is no persistence across reloads.
+- There is no login flow yet.
+- There is no AI chat UI yet.
+
+## Constraints for future changes
+
+- Keep the existing visual language unless the task explicitly changes it.
+- Keep the board interactions simple; do not add extra product features outside the requested scope.
+- Prefer extending the existing board model instead of replacing it.
+- When backend integration begins, preserve the current board behavior first and then swap the data source.
+- If the persisted board schema changes, update tests and docs in the same task.
+
+## Run and test
+
+From `frontend/`:
+
+```bash
+npm install
+npm run dev
+npm run test:unit
+npm run test:e2e
+```
+
+## Notes for later phases
+
+- Part 3 will need a static build strategy compatible with FastAPI serving.
+- Part 4 will introduce a frontend-only login gate before backend integration.
+- Parts 7 to 10 should continue to use the current board shape unless an approved schema change is made.
