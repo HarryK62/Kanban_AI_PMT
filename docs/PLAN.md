@@ -175,12 +175,12 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Add a login screen shown before the board is accessible.
-- [ ] Implement hardcoded credential check for `user` / `password`.
-- [ ] Store login state on the frontend only for this phase.
-- [ ] Add a logout control.
-- [ ] Prevent direct access to the board UI until logged in.
-- [ ] Keep the UI consistent with the defined color scheme and current frontend style.
+- [x] Add a login screen shown before the board is accessible.
+- [x] Implement hardcoded credential check for `user` / `password`.
+- [x] Store login state on the frontend only for this phase.
+- [x] Add a logout control.
+- [x] Prevent direct access to the board UI until logged in.
+- [x] Keep the UI consistent with the defined color scheme and current frontend style.
 
 ### Tests
 

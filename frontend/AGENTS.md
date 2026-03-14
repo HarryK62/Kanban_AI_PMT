@@ -7,7 +7,7 @@ This file describes the current frontend codebase in `frontend/` so future work 
 - This is a standalone Next.js app using the App Router.
 - It can be built as a static export for FastAPI to serve.
 - It is still developed as a standalone frontend app locally.
-- The root page renders a single interactive kanban board.
+- The root page renders a frontend-only login gate before the board.
 - Board state is entirely local React state in the browser.
 - The UI already follows the project color palette and uses local font stacks.
 
@@ -24,15 +24,21 @@ This file describes the current frontend codebase in `frontend/` so future work 
 ## Important files
 
 - `src/app/page.tsx`
-  - Renders the `KanbanBoard` component at `/`.
+  - Renders the `AppShell` component at `/`.
 - `src/app/layout.tsx`
-  - Defines metadata and loads Google fonts.
+  - Defines page metadata.
 - `src/app/globals.css`
   - Defines project color tokens and global styles.
+- `src/components/AppShell.tsx`
+  - Owns the frontend-only login flow.
+  - Validates the hardcoded `user` / `password` credentials.
+  - Stores login state in `localStorage`.
+  - Switches between the login UI and `KanbanBoard`.
 - `src/components/KanbanBoard.tsx`
   - Main client component.
   - Holds board state in `useState`.
   - Handles drag start/end, column rename, add card, and delete card.
+  - Accepts an optional logout action for the current phase.
 - `src/components/KanbanColumn.tsx`
   - Renders a single column.
   - Supports inline column renaming.
@@ -49,10 +55,12 @@ This file describes the current frontend codebase in `frontend/` so future work 
   - Contains card move logic and id generation.
 - `src/components/KanbanBoard.test.tsx`
   - Covers rendering, renaming a column, and adding/removing a card.
+- `src/components/AppShell.test.tsx`
+  - Covers login gating, valid credentials, invalid credentials, and logout.
 - `src/lib/kanban.test.ts`
   - Covers board utility logic.
 - `tests/kanban.spec.ts`
-  - Covers page load, add-card, and drag-and-drop behavior in Playwright.
+  - Covers login gating, page load after login, add-card, drag-and-drop, and logout in Playwright.
 
 ## Current board model
 
@@ -81,13 +89,15 @@ This shape should be treated as the baseline for backend persistence unless ther
 
 ## Current behavior
 
+- The user must sign in with `user` / `password` before seeing the board.
+- Login state is stored in `localStorage`.
+- The user can log out and return to the login screen.
 - The board has five columns seeded from `initialData`.
 - Column titles are editable inline.
 - Cards can be dragged within a column or across columns.
 - Cards can be added from the bottom of each column.
 - Cards can be removed from a column.
 - There is no persistence across reloads.
-- There is no login flow yet.
 - There is no AI chat UI yet.
 
 ## Constraints for future changes
@@ -111,5 +121,4 @@ npm run test:e2e
 
 ## Notes for later phases
 
-- Part 4 will introduce a frontend-only login gate before backend integration.
 - Parts 7 to 10 should continue to use the current board shape unless an approved schema change is made.
