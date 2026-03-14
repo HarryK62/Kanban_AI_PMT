@@ -4,8 +4,8 @@ This directory contains the FastAPI backend for the Project Management MVP.
 
 ## Current state
 
-- `app/main.py` defines the Part 2 scaffold application.
-- `/` serves placeholder HTML from FastAPI so Docker and script wiring can be verified before frontend integration.
+- `app/main.py` serves the exported frontend from `frontend/out` when that build output exists.
+- If `frontend/out` does not exist yet, `/` falls back to the Part 2 placeholder HTML so backend-only work can still be smoke-tested.
 - `/api/hello` returns a simple JSON response for backend smoke testing.
 - Python dependencies are defined in `pyproject.toml`.
 - Local dependency installation should use `uv sync` from `backend/`.
@@ -17,5 +17,5 @@ This directory contains the FastAPI backend for the Project Management MVP.
 
 ## Near-term direction
 
-- Part 3 will replace the placeholder `/` HTML with the built frontend.
+- Part 4 will add the frontend login gate.
 - Later parts will add SQLite persistence and OpenRouter integration.

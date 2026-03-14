@@ -1,12 +1,15 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 
-app = FastAPI(title="Project Management MVP")
+ROOT_DIR = Path(__file__).resolve().parents[2]
+FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
 
 
-@app.get("/", response_class=HTMLResponse)
-async def read_root() -> str:
+def placeholder_html() -> str:
     return """
     <!DOCTYPE html>
     <html lang="en">
@@ -122,6 +125,22 @@ async def read_root() -> str:
     """
 
 
-@app.get("/api/hello")
-async def read_hello() -> dict[str, str]:
-    return {"message": "hello from fastapi"}
+def create_app(frontend_out_dir: Path | None = None) -> FastAPI:
+    app = FastAPI(title="Project Management MVP")
+
+    @app.get("/api/hello")
+    async def read_hello() -> dict[str, str]:
+        return {"message": "hello from fastapi"}
+
+    static_dir = frontend_out_dir or FRONTEND_OUT_DIR
+    if static_dir.exists():
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
+    else:
+        @app.get("/", response_class=HTMLResponse)
+        async def read_root() -> str:
+            return placeholder_html()
+
+    return app
+
+
+app = create_app()

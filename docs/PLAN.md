@@ -149,12 +149,12 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Decide the static export/build strategy for the Next.js app.
-- [ ] Adapt the frontend build output so FastAPI can serve it at `/`.
-- [ ] Preserve the existing board behavior and styling.
-- [ ] Wire the backend root route to serve the built frontend assets instead of example HTML.
-- [ ] Keep local development flow practical for frontend iteration.
-- [ ] Add or adjust tests for the integrated static-serving setup.
+- [x] Decide the static export/build strategy for the Next.js app.
+- [x] Adapt the frontend build output so FastAPI can serve it at `/`.
+- [x] Preserve the existing board behavior and styling.
+- [x] Wire the backend root route to serve the built frontend assets instead of example HTML.
+- [x] Keep local development flow practical for frontend iteration.
+- [x] Add or adjust tests for the integrated static-serving setup.
 
 ### Tests
 

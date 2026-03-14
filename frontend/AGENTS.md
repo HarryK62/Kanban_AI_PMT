@@ -5,10 +5,11 @@ This file describes the current frontend codebase in `frontend/` so future work 
 ## Current state
 
 - This is a standalone Next.js app using the App Router.
-- It is currently a frontend-only demo with no backend integration.
+- It can be built as a static export for FastAPI to serve.
+- It is still developed as a standalone frontend app locally.
 - The root page renders a single interactive kanban board.
 - Board state is entirely local React state in the browser.
-- The UI already follows the project color palette and has custom typography.
+- The UI already follows the project color palette and uses local font stacks.
 
 ## Tooling
 
@@ -18,6 +19,7 @@ This file describes the current frontend codebase in `frontend/` so future work 
 - Drag and drop: `@dnd-kit/core` and `@dnd-kit/sortable`
 - Unit/component tests: Vitest + Testing Library
 - End-to-end tests: Playwright
+- Production build: static export via `next build --webpack`
 
 ## Important files
 
@@ -109,6 +111,5 @@ npm run test:e2e
 
 ## Notes for later phases
 
-- Part 3 will need a static build strategy compatible with FastAPI serving.
 - Part 4 will introduce a frontend-only login gate before backend integration.
 - Parts 7 to 10 should continue to use the current board shape unless an approved schema change is made.

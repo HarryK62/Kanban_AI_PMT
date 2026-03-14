@@ -15,7 +15,7 @@
 @theme inline {
   --color-background: var(--surface);
   --color-foreground: var(--navy-dark);
-  --font-sans: var(--font-body);
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
 }
 
 * {
@@ -25,10 +25,10 @@
 body {
   background: var(--surface);
   color: var(--navy-dark);
-  font-family: var(--font-body), "Segoe UI", sans-serif;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
   margin: 0;
 }
 
 .font-display {
-  font-family: var(--font-display), "Segoe UI", sans-serif;
+  font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
 }
