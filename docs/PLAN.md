@@ -98,7 +98,7 @@ Reasoning:
 - [x] Expand this file into a detailed execution plan.
 - [x] Add tests and success criteria for each phase.
 - [x] Document the current frontend codebase in `frontend/AGENTS.md`.
-- [ ] Get user approval on this plan before starting Part 2.
+- [x] Get user approval on this plan before starting Part 2.
 
 ### Tests
 
@@ -115,15 +115,17 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Create the backend project structure under `backend/`.
-- [ ] Add FastAPI app entrypoint and routing structure.
-- [ ] Configure Python dependencies using `uv`.
-- [ ] Add Dockerfile and any supporting container configuration.
-- [ ] Add start and stop scripts for macOS, Linux, and Windows in `scripts/`.
-- [ ] Serve a minimal HTML page from `/` through FastAPI.
-- [ ] Add a simple API route such as `/api/health` or `/api/hello`.
-- [ ] Ensure the container reads required environment variables from the project setup.
-- [ ] Document the minimal run flow in the README only if necessary.
+- [x] Create the backend project structure under `backend/`.
+- [x] Add FastAPI app entrypoint and routing structure.
+- [x] Define Python dependencies in `backend/pyproject.toml`.
+- [x] Use `uv sync` as the local backend dependency setup flow.
+- [x] Use the same `backend/pyproject.toml` dependency definition in Docker.
+- [x] Add Dockerfile and any supporting container configuration.
+- [x] Add start and stop scripts for macOS, Linux, and Windows in `scripts/`.
+- [x] Serve a minimal HTML page from `/` through FastAPI.
+- [x] Add a simple API route such as `/api/health` or `/api/hello`.
+- [x] Ensure the container reads required environment variables from the project setup.
+- [x] Add `.env.example`, require `.env`, and leave README unchanged because the script flow is currently self-explanatory.
 
 ### Tests
 
