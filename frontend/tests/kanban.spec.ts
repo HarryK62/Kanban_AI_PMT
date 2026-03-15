@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-const login = async (page: Parameters<typeof test>[0]["page"]) => {
+const login = async (page: Page) => {
   await page.goto("/");
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("password");
@@ -57,10 +57,42 @@ test("moves a card between columns", async ({ page }) => {
 
 test("logs out back to the login screen", async ({ page }) => {
   await login(page);
+  await page.locator('[data-testid^="column-"]').first().getByRole("button", {
+    name: /add a card/i,
+  }).click();
+  await page.getByPlaceholder("Card title").fill("Session card");
+  await page.getByPlaceholder("Details").fill("Persists in this tab.");
+  await page.getByRole("button", { name: /add card/i }).click();
   await page.getByRole("button", { name: /log out/i }).click();
 
   await expect(
     page.getByRole("heading", { name: /sign in to open your board/i })
   ).toBeVisible();
-  await expect(page.locator('[data-testid^="column-"]')).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).not.toBeVisible();
+
+  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expect(page.getByText("Session card")).toBeVisible();
+});
+
+test("opens a fresh board in a new window", async ({ browser, page }) => {
+  await login(page);
+  const firstColumn = page.locator('[data-testid^="column-"]').first();
+  await firstColumn.getByRole("button", { name: /add a card/i }).click();
+  await firstColumn.getByPlaceholder("Card title").fill("Tab-only card");
+  await firstColumn.getByPlaceholder("Details").fill("Should not appear elsewhere.");
+  await firstColumn.getByRole("button", { name: /add card/i }).click();
+  await expect(page.getByText("Tab-only card")).toBeVisible();
+
+  const secondPage = await browser.newPage();
+  await secondPage.goto("/");
+  await expect(
+    secondPage.getByRole("heading", { name: /sign in to open your board/i })
+  ).toBeVisible();
+  await secondPage.getByLabel("Username").fill("user");
+  await secondPage.getByLabel("Password").fill("password");
+  await secondPage.getByRole("button", { name: /sign in/i }).click();
+  await expect(secondPage.getByText("Tab-only card")).toHaveCount(0);
+  await secondPage.close();
 });

@@ -32,7 +32,7 @@ This file describes the current frontend codebase in `frontend/` so future work 
 - `src/components/AppShell.tsx`
   - Owns the frontend-only login flow.
   - Validates the hardcoded `user` / `password` credentials.
-  - Stores login state in `localStorage`.
+  - Stores login visibility in React state only.
   - Switches between the login UI and `KanbanBoard`.
 - `src/components/KanbanBoard.tsx`
   - Main client component.
@@ -90,8 +90,9 @@ This shape should be treated as the baseline for backend persistence unless ther
 ## Current behavior
 
 - The user must sign in with `user` / `password` before seeing the board.
-- Login state is stored in `localStorage`.
+- Login state is stored only in memory, so a new window or refresh starts fresh.
 - The user can log out and return to the login screen.
+- Board changes persist across logout/login in the same tab only because the board stays mounted in memory.
 - The board has five columns seeded from `initialData`.
 - Column titles are editable inline.
 - Cards can be dragged within a column or across columns.
