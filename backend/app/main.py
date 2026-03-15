@@ -4,9 +4,13 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.models import Board, BoardRecord
+from app.repository import BoardRepository
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
+DEFAULT_DB_PATH = ROOT_DIR / "backend" / "data" / "app.db"
 
 
 def placeholder_html() -> str:
@@ -125,12 +129,26 @@ def placeholder_html() -> str:
     """
 
 
-def create_app(frontend_out_dir: Path | None = None) -> FastAPI:
+def create_app(
+    frontend_out_dir: Path | None = None,
+    db_path: Path | None = None,
+) -> FastAPI:
     app = FastAPI(title="Project Management MVP")
+    repository = BoardRepository(db_path or DEFAULT_DB_PATH)
 
     @app.get("/api/hello")
     async def read_hello() -> dict[str, str]:
         return {"message": "hello from fastapi"}
+
+    @app.get("/api/board/{username}", response_model=BoardRecord)
+    async def read_board(username: str) -> BoardRecord:
+        board = repository.get_or_create_board(username)
+        return BoardRecord(username=username, board=board)
+
+    @app.put("/api/board/{username}", response_model=BoardRecord)
+    async def update_board(username: str, board: Board) -> BoardRecord:
+        saved_board = repository.replace_board(username, board)
+        return BoardRecord(username=username, board=saved_board)
 
     static_dir = frontend_out_dir or FRONTEND_OUT_DIR
     if static_dir.exists():

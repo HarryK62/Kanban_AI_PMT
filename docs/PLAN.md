@@ -210,7 +210,7 @@ Reasoning:
 - [x] Define the JSON schema for the board document.
 - [x] Document how a default board is created for a new user.
 - [x] Document how versioning and future board migrations would work.
-- [ ] Get explicit user sign-off on the database design before implementing it.
+- [x] Get explicit user sign-off on the database design before implementing it.
 
 ### Tests
 
@@ -226,13 +226,13 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Add SQLite initialization on backend startup or first use.
-- [ ] Create tables if they do not already exist.
-- [ ] Implement backend model/service helpers for loading and saving board JSON.
-- [ ] Implement API routes to fetch the current user's board.
-- [ ] Implement API routes to replace the current user's board.
-- [ ] Return consistent JSON responses and clear error handling.
-- [ ] Seed a default board for a user when no board exists yet.
+- [x] Add SQLite initialization on backend startup or first use.
+- [x] Create tables if they do not already exist.
+- [x] Implement backend model/service helpers for loading and saving board JSON.
+- [x] Implement API routes to fetch the current user's board.
+- [x] Implement API routes to replace the current user's board.
+- [x] Return consistent JSON responses and clear error handling.
+- [x] Seed a default board for a user when no board exists yet.
 
 ### Tests
 
