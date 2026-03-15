@@ -205,11 +205,11 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Write a short design note in `docs/` describing the SQLite storage approach.
-- [ ] Define the database schema for `users` and `boards`.
-- [ ] Define the JSON schema for the board document.
-- [ ] Document how a default board is created for a new user.
-- [ ] Document how versioning and future board migrations would work.
+- [x] Write a short design note in `docs/` describing the SQLite storage approach.
+- [x] Define the database schema for `users` and `boards`.
+- [x] Define the JSON schema for the board document.
+- [x] Document how a default board is created for a new user.
+- [x] Document how versioning and future board migrations would work.
 - [ ] Get explicit user sign-off on the database design before implementing it.
 
 ### Tests
