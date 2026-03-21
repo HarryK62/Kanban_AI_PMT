@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -101,3 +102,16 @@ def test_board_replace_rejects_invalid_payload(tmp_path: Path) -> None:
     response = client.put("/api/board/user", json=board_payload)
 
     assert response.status_code == 422
+
+
+def test_ai_connectivity_route_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    db_path = tmp_path / "app.db"
+    client = TestClient(
+        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
+    )
+
+    response = client.post("/api/ai/test")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "OPENROUTER_API_KEY is not configured."}

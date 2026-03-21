@@ -1,9 +1,11 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.ai import OPENROUTER_MODEL, OpenRouterClient
 from app.models import Board, BoardRecord
 from app.repository import BoardRepository
 
@@ -11,6 +13,11 @@ from app.repository import BoardRepository
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
 DEFAULT_DB_PATH = ROOT_DIR / "backend" / "data" / "app.db"
+
+
+class AiTestResponse(BaseModel):
+    model: str
+    reply: str
 
 
 def placeholder_html() -> str:
@@ -149,6 +156,12 @@ def create_app(
     async def update_board(username: str, board: Board) -> BoardRecord:
         saved_board = repository.replace_board(username, board)
         return BoardRecord(username=username, board=saved_board)
+
+    @app.post("/api/ai/test", response_model=AiTestResponse)
+    async def ai_connectivity_test() -> AiTestResponse:
+        client = OpenRouterClient()
+        reply = await client.connectivity_test()
+        return AiTestResponse(model=OPENROUTER_MODEL, reply=reply)
 
     static_dir = frontend_out_dir or FRONTEND_OUT_DIR
     if static_dir.exists():

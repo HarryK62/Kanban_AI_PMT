@@ -8,7 +8,9 @@ This directory contains the FastAPI backend for the Project Management MVP.
 - If `frontend/out` does not exist yet, `/` falls back to the Part 2 placeholder HTML so backend-only work can still be smoke-tested.
 - `/api/hello` returns a simple JSON response for backend smoke testing.
 - `/api/board/{username}` supports `GET` and `PUT` for board persistence.
+- `/api/ai/test` performs a minimal OpenRouter connectivity check using the configured API key.
 - `app/models.py` defines the Pydantic board schema and validation rules.
+- `app/ai.py` contains the OpenRouter client used for connectivity and later AI features.
 - `app/repository.py` handles SQLite initialization, default board creation, and board reads/writes.
 - Python dependencies are defined in `pyproject.toml`.
 - Local dependency installation should use `uv sync` from `backend/`.

@@ -282,12 +282,12 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Add backend configuration for `OPENROUTER_API_KEY`.
-- [ ] Implement a minimal OpenRouter client in the backend.
-- [ ] Add a temporary test route or service path to send a simple prompt.
-- [ ] Use model `openai/gpt-oss-120b`.
-- [ ] Confirm a basic prompt such as `2+2` returns a valid response.
-- [ ] Add minimal error handling for missing API key and upstream failures.
+- [x] Add backend configuration for `OPENROUTER_API_KEY`.
+- [x] Implement a minimal OpenRouter client in the backend.
+- [x] Add a temporary test route or service path to send a simple prompt.
+- [x] Use model `openai/gpt-oss-120b`.
+- [x] Confirm a basic prompt such as `2+2` returns a valid response.
+- [x] Add minimal error handling for missing API key and upstream failures.
 
 ### Tests
 
