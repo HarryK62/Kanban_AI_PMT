@@ -76,7 +76,7 @@ test("logs out back to the login screen", async ({ page }) => {
   await expect(page.getByText("Session card")).toBeVisible();
 });
 
-test("opens a fresh board in a new window", async ({ browser, page }) => {
+test("loads the persisted board in a new window", async ({ browser, page }) => {
   await login(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
   await firstColumn.getByRole("button", { name: /add a card/i }).click();
@@ -93,6 +93,6 @@ test("opens a fresh board in a new window", async ({ browser, page }) => {
   await secondPage.getByLabel("Username").fill("user");
   await secondPage.getByLabel("Password").fill("password");
   await secondPage.getByRole("button", { name: /sign in/i }).click();
-  await expect(secondPage.getByText("Tab-only card")).toHaveCount(0);
+  await expect(secondPage.getByText("Tab-only card")).toBeVisible();
   await secondPage.close();
 });

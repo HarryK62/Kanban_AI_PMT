@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -17,11 +17,54 @@ import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
   onLogout?: () => void;
+  username: string;
 };
 
-export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
+type BoardResponse = {
+  username: string;
+  board: BoardData;
+};
+
+export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadBoard = async () => {
+      setIsLoading(true);
+      setErrorMessage("");
+
+      try {
+        const response = await fetch(`/api/board/${username}`);
+        if (!response.ok) {
+          throw new Error("Unable to load board.");
+        }
+
+        const data = (await response.json()) as BoardResponse;
+        if (isActive) {
+          setBoard(data.board);
+        }
+      } catch {
+        if (isActive) {
+          setErrorMessage("Unable to load the board right now.");
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadBoard();
+
+    return () => {
+      isActive = false;
+    };
+  }, [username]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -30,6 +73,33 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
   );
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
+
+  const persistBoard = async (nextBoard: BoardData) => {
+    setErrorMessage("");
+
+    const response = await fetch(`/api/board/${username}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(nextBoard),
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to save board.");
+    }
+
+    const data = (await response.json()) as BoardResponse;
+    setBoard(data.board);
+  };
+
+  const updateBoard = (updater: (currentBoard: BoardData) => BoardData) => {
+    const nextBoard = updater(board);
+    setBoard(nextBoard);
+    void persistBoard(nextBoard).catch(() => {
+      setErrorMessage("Unable to save the latest board changes.");
+    });
+  };
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
@@ -43,14 +113,14 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
       return;
     }
 
-    setBoard((prev) => ({
+    updateBoard((prev) => ({
       ...prev,
       columns: moveCard(prev.columns, active.id as string, over.id as string),
     }));
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
+    updateBoard((prev) => ({
       ...prev,
       columns: prev.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
@@ -60,7 +130,7 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
+    updateBoard((prev) => ({
       ...prev,
       cards: {
         ...prev.cards,
@@ -75,22 +145,20 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
-    setBoard((prev) => {
-      return {
-        ...prev,
-        cards: Object.fromEntries(
-          Object.entries(prev.cards).filter(([id]) => id !== cardId)
-        ),
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? {
-                ...column,
-                cardIds: column.cardIds.filter((id) => id !== cardId),
-              }
-            : column
-        ),
-      };
-    });
+    updateBoard((prev) => ({
+      ...prev,
+      cards: Object.fromEntries(
+        Object.entries(prev.cards).filter(([id]) => id !== cardId)
+      ),
+      columns: prev.columns.map((column) =>
+        column.id === columnId
+          ? {
+              ...column,
+              cardIds: column.cardIds.filter((id) => id !== cardId),
+            }
+          : column
+      ),
+    }));
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
@@ -108,12 +176,22 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
                 Single Board Kanban
               </p>
               <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                Kanban Studio
+                {board.title}
               </h1>
               <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
                 Keep momentum visible. Rename columns, drag cards between stages,
                 and capture quick notes without getting buried in settings.
               </p>
+              {isLoading ? (
+                <p className="mt-4 text-sm font-medium text-[var(--primary-blue)]">
+                  Loading board...
+                </p>
+              ) : null}
+              {errorMessage ? (
+                <p className="mt-4 text-sm font-medium text-[var(--secondary-purple)]">
+                  {errorMessage}
+                </p>
+              ) : null}
             </div>
             <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
@@ -152,7 +230,7 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <section className="grid gap-6 lg:grid-cols-5">
+          <section className="grid gap-6 lg:grid-cols-5" aria-busy={isLoading}>
             {board.columns.map((column) => (
               <KanbanColumn
                 key={column.id}

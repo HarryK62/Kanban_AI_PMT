@@ -35,7 +35,7 @@ export const AppShell = () => {
   return (
     <div className="relative">
       <div hidden={!isAuthenticated}>
-        <KanbanBoard onLogout={handleLogout} />
+        <KanbanBoard onLogout={handleLogout} username={VALID_USERNAME} />
       </div>
       <div hidden={isAuthenticated}>
         <div className="relative overflow-hidden">

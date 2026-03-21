@@ -8,7 +8,7 @@ This file describes the current frontend codebase in `frontend/` so future work 
 - It can be built as a static export for FastAPI to serve.
 - It is still developed as a standalone frontend app locally.
 - The root page renders a frontend-only login gate before the board.
-- Board state is entirely local React state in the browser.
+- Board state is loaded from and saved to the backend board API.
 - The UI already follows the project color palette and uses local font stacks.
 
 ## Tooling
@@ -36,7 +36,8 @@ This file describes the current frontend codebase in `frontend/` so future work 
   - Switches between the login UI and `KanbanBoard`.
 - `src/components/KanbanBoard.tsx`
   - Main client component.
-  - Holds board state in `useState`.
+  - Loads the board from the backend on mount.
+  - Persists board updates back to the backend API.
   - Handles drag start/end, column rename, add card, and delete card.
   - Accepts an optional logout action for the current phase.
 - `src/components/KanbanColumn.tsx`
@@ -80,6 +81,8 @@ type Column = {
 };
 
 type BoardData = {
+  version: number;
+  title: string;
   columns: Column[];
   cards: Record<string, Card>;
 };
@@ -90,15 +93,15 @@ This shape should be treated as the baseline for backend persistence unless ther
 ## Current behavior
 
 - The user must sign in with `user` / `password` before seeing the board.
-- Login state is stored only in memory, so a new window or refresh starts fresh.
+- Login state is stored only in memory, so a new window or refresh returns to the login screen.
 - The user can log out and return to the login screen.
-- Board changes persist across logout/login in the same tab only because the board stays mounted in memory.
+- Board changes persist through the backend API.
+- A new window shows the same saved board after login.
 - The board has five columns seeded from `initialData`.
 - Column titles are editable inline.
 - Cards can be dragged within a column or across columns.
 - Cards can be added from the bottom of each column.
 - Cards can be removed from a column.
-- There is no persistence across reloads.
 - There is no AI chat UI yet.
 
 ## Constraints for future changes
@@ -106,7 +109,7 @@ This shape should be treated as the baseline for backend persistence unless ther
 - Keep the existing visual language unless the task explicitly changes it.
 - Keep the board interactions simple; do not add extra product features outside the requested scope.
 - Prefer extending the existing board model instead of replacing it.
-- When backend integration begins, preserve the current board behavior first and then swap the data source.
+- Preserve the current board behavior while using the backend as the source of truth.
 - If the persisted board schema changes, update tests and docs in the same task.
 
 ## Run and test
@@ -118,6 +121,7 @@ npm install
 npm run dev
 npm run test:unit
 npm run test:e2e
+npm run test:e2e:integration
 ```
 
 ## Notes for later phases

@@ -254,11 +254,11 @@ Reasoning:
 
 ### Checklist
 
-- [ ] Replace in-memory board initialization with backend fetch on load.
-- [ ] Send board updates to the backend when the user renames columns, adds cards, deletes cards, or moves cards.
-- [ ] Add loading and error states that are minimal but usable.
-- [ ] Preserve the current board interactions and visual design.
-- [ ] Ensure the login flow and the chosen user identity line up with backend requests.
+- [x] Replace in-memory board initialization with backend fetch on load.
+- [x] Send board updates to the backend when the user renames columns, adds cards, deletes cards, or moves cards.
+- [x] Add loading and error states that are minimal but usable.
+- [x] Preserve the current board interactions and visual design.
+- [x] Ensure the login flow and the chosen user identity line up with backend requests.
 
 ### Tests
 

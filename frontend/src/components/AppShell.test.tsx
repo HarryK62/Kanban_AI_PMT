@@ -1,18 +1,53 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppShell } from "@/components/AppShell";
+import { initialData, type BoardData } from "@/lib/kanban";
 
 describe("AppShell", () => {
+  let currentBoard: BoardData;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof input === "string" && input.endsWith("/api/board/user")) {
+      if (init?.method === "PUT" && init.body) {
+        currentBoard = JSON.parse(String(init.body)) as BoardData;
+        return new Response(
+          JSON.stringify({
+            username: "user",
+            board: currentBoard,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          username: "user",
+          board: currentBoard,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    throw new Error(`Unhandled fetch request: ${String(input)}`);
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+    currentBoard = structuredClone(initialData);
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockClear();
   });
 
-  it("shows the login gate before the board", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the login gate before the board", async () => {
     render(<AppShell />);
 
     expect(screen.getByRole("heading", { name: /sign in to open your board/i })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Kanban Studio" })).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 
   it("authenticates with the valid credentials", async () => {
@@ -22,7 +57,7 @@ describe("AppShell", () => {
     await userEvent.type(screen.getByLabelText(/password/i), "password");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
-    expect(screen.getByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
   });
 
   it("shows an error for invalid credentials", async () => {
@@ -44,6 +79,7 @@ describe("AppShell", () => {
     await userEvent.type(screen.getByLabelText(/username/i), "user");
     await userEvent.type(screen.getByLabelText(/password/i), "password");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await screen.findByText("Backlog");
     await userEvent.click(screen.getByRole("button", { name: /log out/i }));
 
     expect(screen.getByRole("heading", { name: /sign in to open your board/i })).toBeInTheDocument();
@@ -55,6 +91,7 @@ describe("AppShell", () => {
     await userEvent.type(screen.getByLabelText(/username/i), "user");
     await userEvent.type(screen.getByLabelText(/password/i), "password");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await screen.findByText("Backlog");
 
     const firstColumn = screen.getAllByTestId(/column-/i)[0];
     await userEvent.click(
@@ -77,6 +114,6 @@ describe("AppShell", () => {
     await userEvent.type(screen.getByLabelText(/password/i), "password");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
-    expect(screen.getByText("Session card")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Session card")).toBeInTheDocument());
   });
 });
