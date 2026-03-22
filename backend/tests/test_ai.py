@@ -4,7 +4,12 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.ai import CONNECTIVITY_PROMPT, OPENROUTER_API_URL, OpenRouterClient
+from app.ai import (
+    CONNECTIVITY_PROMPT,
+    OPENROUTER_API_URL,
+    OpenRouterClient,
+    build_chat_messages,
+)
 
 
 @pytest.mark.anyio
@@ -56,3 +61,16 @@ async def test_complete_rejects_bad_upstream_response() -> None:
 
     assert excinfo.value.status_code == 502
     assert excinfo.value.detail == "OpenRouter response was malformed."
+
+
+def test_build_chat_messages_adds_system_and_board_context() -> None:
+    messages = build_chat_messages(
+        history=[{"role": "user", "content": "Move the card."}],
+        board_json={"version": 1, "title": "Kanban Studio", "columns": [], "cards": {}},
+    )
+
+    assert messages[0]["role"] == "system"
+    assert "Return only JSON" in messages[0]["content"]
+    assert messages[1]["role"] == "system"
+    assert "Current board JSON:" in messages[1]["content"]
+    assert messages[2] == {"role": "user", "content": "Move the card."}

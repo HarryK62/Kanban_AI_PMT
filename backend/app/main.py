@@ -1,14 +1,19 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.ai import OPENROUTER_MODEL, OpenRouterClient
-from app.models import Board, BoardRecord
+from app.ai import OPENROUTER_MODEL, OpenRouterClient, build_chat_messages
+from app.models import (
+    AiStructuredReply,
+    Board,
+    BoardRecord,
+    ChatMessageCreate,
+    ChatReply,
+)
 from app.repository import BoardRepository
-
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
@@ -139,6 +144,7 @@ def placeholder_html() -> str:
 def create_app(
     frontend_out_dir: Path | None = None,
     db_path: Path | None = None,
+    ai_client: OpenRouterClient | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Project Management MVP")
     repository = BoardRepository(db_path or DEFAULT_DB_PATH)
@@ -149,13 +155,72 @@ def create_app(
 
     @app.get("/api/board/{username}", response_model=BoardRecord)
     async def read_board(username: str) -> BoardRecord:
-        board = repository.get_or_create_board(username)
-        return BoardRecord(username=username, board=board)
+        current_board_state_id, board = repository.get_or_create_board(username)
+        return BoardRecord(
+            username=username,
+            current_board_state_id=current_board_state_id,
+            board=board,
+        )
 
     @app.put("/api/board/{username}", response_model=BoardRecord)
     async def update_board(username: str, board: Board) -> BoardRecord:
-        saved_board = repository.replace_board(username, board)
-        return BoardRecord(username=username, board=saved_board)
+        current_board_state_id, saved_board = repository.replace_board(username, board)
+        return BoardRecord(
+            username=username,
+            current_board_state_id=current_board_state_id,
+            board=saved_board,
+        )
+
+    @app.post("/api/chat/{username}/messages", response_model=ChatReply)
+    async def create_chat_message(
+        username: str,
+        chat_message: ChatMessageCreate,
+    ) -> ChatReply:
+        current_board_state_id, board = repository.get_board_snapshot(username)
+        chat_id, _ = repository.append_chat_message(
+            username=username,
+            role="user",
+            content=chat_message.message.strip(),
+            board_state_id=current_board_state_id,
+        )
+
+        history = repository.list_chat_history(username)
+        client = ai_client or OpenRouterClient()
+        raw_reply = await client.complete_messages(
+            build_chat_messages(
+                history=history,
+                board_json=board.model_dump(by_alias=True),
+            )
+        )
+
+        try:
+            structured_reply = AiStructuredReply.model_validate_json(raw_reply)
+        except Exception:
+            raise HTTPException(
+                status_code=502,
+                detail="AI response was malformed.",
+            ) from None
+
+        next_board_state_id = current_board_state_id
+        next_board = board
+        if structured_reply.board_update is not None:
+            next_board_state_id, next_board = repository.apply_board_state(
+                username,
+                structured_reply.board_update.board,
+            )
+
+        _, assistant_message = repository.append_chat_message(
+            username=username,
+            role="assistant",
+            content=structured_reply.reply,
+            board_state_id=next_board_state_id,
+        )
+        return ChatReply(
+            chat_id=chat_id,
+            assistant_message=assistant_message,
+            current_board_state_id=next_board_state_id,
+            board=next_board,
+        )
 
     @app.post("/api/ai/test", response_model=AiTestResponse)
     async def ai_connectivity_test() -> AiTestResponse:

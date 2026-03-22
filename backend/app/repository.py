@@ -1,9 +1,9 @@
-import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.models import Board
+from app.ai import json_dumps
+from app.models import Board, ChatMessageRecord
 
 
 DEFAULT_USERNAME = "user"
@@ -102,90 +102,102 @@ class BoardRepository:
 
                 CREATE TABLE IF NOT EXISTS boards (
                   id INTEGER PRIMARY KEY,
-                  user_id INTEGER NOT NULL,
-                  board_json TEXT NOT NULL,
+                  user_id INTEGER NOT NULL UNIQUE,
+                  current_board_state_id INTEGER UNIQUE,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   FOREIGN KEY (user_id) REFERENCES users(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS board_states (
+                  id INTEGER PRIMARY KEY,
+                  board_id INTEGER NOT NULL,
+                  previous_board_state_id INTEGER,
+                  board_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  FOREIGN KEY (board_id) REFERENCES boards(id),
+                  FOREIGN KEY (previous_board_state_id) REFERENCES board_states(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS chats (
+                  id INTEGER PRIMARY KEY,
+                  user_id INTEGER NOT NULL UNIQUE,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY (user_id) REFERENCES users(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                  id INTEGER PRIMARY KEY,
+                  chat_id INTEGER NOT NULL,
+                  sequence_number INTEGER NOT NULL,
+                  role TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  board_state_id INTEGER NOT NULL,
+                  created_at TEXT NOT NULL,
+                  FOREIGN KEY (chat_id) REFERENCES chats(id),
+                  FOREIGN KEY (board_state_id) REFERENCES board_states(id),
+                  UNIQUE(chat_id, sequence_number)
+                );
+                """
+            )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_user_id
+                ON boards(user_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_current_board_state_id
+                ON boards(current_board_state_id)
+                WHERE current_board_state_id IS NOT NULL
                 """
             )
 
-    def get_or_create_board(self, username: str) -> Board:
+    def get_or_create_board(self, username: str) -> tuple[int, Board]:
         self.initialize()
 
         with self.connect() as connection:
             user_id = self._get_or_create_user(connection, username)
-            row = connection.execute(
-                """
-                SELECT board_json
-                FROM boards
-                WHERE user_id = ?
-                ORDER BY id ASC
-                LIMIT 1
-                """,
-                (user_id,),
-            ).fetchone()
+            row = self._read_current_board_row(connection, user_id)
 
             if row is None:
-                board = default_board()
-                serialized_board = json.dumps(
-                    board.model_dump(by_alias=True),
-                    separators=(",", ":"),
-                )
-                timestamp = current_timestamp()
-                connection.execute(
-                    """
-                    INSERT INTO boards (user_id, board_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (user_id, serialized_board, timestamp, timestamp),
-                )
-                return board
+                row = self._create_board(connection, user_id, default_board())
 
-            return Board.model_validate(json.loads(row["board_json"]))
+            return int(row["current_board_state_id"]), self._deserialize_board(
+                row["board_json"]
+            )
 
-    def replace_board(self, username: str, board: Board) -> Board:
+    def replace_board(self, username: str, board: Board) -> tuple[int, Board]:
         self.initialize()
 
         with self.connect() as connection:
             user_id = self._get_or_create_user(connection, username)
-            existing_board = connection.execute(
-                """
-                SELECT id
-                FROM boards
-                WHERE user_id = ?
-                ORDER BY id ASC
-                LIMIT 1
-                """,
-                (user_id,),
-            ).fetchone()
-
-            serialized_board = json.dumps(
-                board.model_dump(by_alias=True),
-                separators=(",", ":"),
-            )
+            existing_board = self._read_current_board_row(connection, user_id)
             timestamp = current_timestamp()
 
             if existing_board is None:
-                connection.execute(
-                    """
-                    INSERT INTO boards (user_id, board_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (user_id, serialized_board, timestamp, timestamp),
-                )
-                return board
+                self._create_board(connection, user_id, default_board(), timestamp=timestamp)
+                existing_board = self._read_current_board_row(connection, user_id)
+
+            next_board_state_id = self._insert_board_state(
+                connection=connection,
+                board_id=int(existing_board["board_id"]),
+                previous_board_state_id=int(existing_board["current_board_state_id"]),
+                board=board,
+                timestamp=timestamp,
+            )
 
             connection.execute(
                 """
                 UPDATE boards
-                SET board_json = ?, updated_at = ?
+                SET current_board_state_id = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (serialized_board, timestamp, existing_board["id"]),
+                (next_board_state_id, timestamp, existing_board["board_id"]),
             )
-            return board
+            return next_board_state_id, board
 
     def _get_or_create_user(self, connection: sqlite3.Connection, username: str) -> int:
         row = connection.execute(
@@ -203,3 +215,241 @@ class BoardRepository:
             (username, current_timestamp()),
         )
         return int(cursor.lastrowid)
+
+    def _read_current_board_row(
+        self,
+        connection: sqlite3.Connection,
+        user_id: int,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            """
+            SELECT boards.id AS board_id, boards.current_board_state_id, board_states.board_json
+            FROM boards
+            JOIN board_states ON board_states.id = boards.current_board_state_id
+            WHERE boards.user_id = ?
+            ORDER BY boards.id ASC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+
+    def _create_board(
+        self,
+        connection: sqlite3.Connection,
+        user_id: int,
+        board: Board,
+        timestamp: str | None = None,
+    ) -> sqlite3.Row:
+        created_at = timestamp or current_timestamp()
+        board_cursor = connection.execute(
+            """
+            INSERT INTO boards (user_id, current_board_state_id, created_at, updated_at)
+            VALUES (?, NULL, ?, ?)
+            """,
+            (user_id, created_at, created_at),
+        )
+        board_id = int(board_cursor.lastrowid)
+        board_state_id = self._insert_board_state(
+            connection=connection,
+            board_id=board_id,
+            previous_board_state_id=None,
+            board=board,
+            timestamp=created_at,
+        )
+        connection.execute(
+            """
+            UPDATE boards
+            SET current_board_state_id = ?
+            WHERE id = ?
+            """,
+            (board_state_id, board_id),
+        )
+        row = self._read_current_board_row(connection, user_id)
+        if row is None:
+            raise RuntimeError("Board creation failed to produce a current board state.")
+        return row
+
+    def _insert_board_state(
+        self,
+        connection: sqlite3.Connection,
+        board_id: int,
+        previous_board_state_id: int | None,
+        board: Board,
+        timestamp: str,
+    ) -> int:
+        cursor = connection.execute(
+            """
+            INSERT INTO board_states (board_id, previous_board_state_id, board_json, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                board_id,
+                previous_board_state_id,
+                self._serialize_board(board),
+                timestamp,
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    def _serialize_board(self, board: Board) -> str:
+        return json_dumps(board.model_dump(by_alias=True))
+
+    def _deserialize_board(self, board_json: str) -> Board:
+        import json
+
+        return Board.model_validate(json.loads(board_json))
+
+    def get_or_create_chat(self, username: str) -> int:
+        self.initialize()
+
+        with self.connect() as connection:
+            user_id = self._get_or_create_user(connection, username)
+            board_row = self._read_current_board_row(connection, user_id)
+            if board_row is None:
+                self._create_board(connection, user_id, default_board())
+
+            row = connection.execute(
+                """
+                SELECT id
+                FROM chats
+                WHERE user_id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if row is not None:
+                return int(row["id"])
+
+            timestamp = current_timestamp()
+            cursor = connection.execute(
+                """
+                INSERT INTO chats (user_id, created_at, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (user_id, timestamp, timestamp),
+            )
+            return int(cursor.lastrowid)
+
+    def list_chat_history(self, username: str) -> list[dict[str, str]]:
+        self.initialize()
+
+        with self.connect() as connection:
+            chat_id = self._get_or_create_chat_id(connection, username)
+            rows = connection.execute(
+                """
+                SELECT role, content
+                FROM chat_messages
+                WHERE chat_id = ?
+                ORDER BY sequence_number ASC
+                """,
+                (chat_id,),
+            ).fetchall()
+            return [{"role": row["role"], "content": row["content"]} for row in rows]
+
+    def append_chat_message(
+        self,
+        username: str,
+        role: str,
+        content: str,
+        board_state_id: int,
+    ) -> tuple[int, ChatMessageRecord]:
+        self.initialize()
+
+        with self.connect() as connection:
+            chat_id = self._get_or_create_chat_id(connection, username)
+            row = self._insert_chat_message(
+                connection=connection,
+                chat_id=chat_id,
+                role=role,
+                content=content,
+                board_state_id=board_state_id,
+            )
+            return chat_id, self._chat_message_from_row(row)
+
+    def get_board_snapshot(self, username: str) -> tuple[int, Board]:
+        return self.get_or_create_board(username)
+
+    def apply_board_state(self, username: str, board: Board) -> tuple[int, Board]:
+        return self.replace_board(username, board)
+
+    def _get_or_create_chat_id(self, connection: sqlite3.Connection, username: str) -> int:
+        user_id = self._get_or_create_user(connection, username)
+        board_row = self._read_current_board_row(connection, user_id)
+        if board_row is None:
+            self._create_board(connection, user_id, default_board())
+
+        row = connection.execute(
+            """
+            SELECT id
+            FROM chats
+            WHERE user_id = ?
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        if row is not None:
+            return int(row["id"])
+
+        timestamp = current_timestamp()
+        cursor = connection.execute(
+            """
+            INSERT INTO chats (user_id, created_at, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, timestamp, timestamp),
+        )
+        return int(cursor.lastrowid)
+
+    def _insert_chat_message(
+        self,
+        connection: sqlite3.Connection,
+        chat_id: int,
+        role: str,
+        content: str,
+        board_state_id: int,
+    ) -> sqlite3.Row:
+        next_sequence_number = (
+            connection.execute(
+                """
+                SELECT COALESCE(MAX(sequence_number), 0) + 1
+                FROM chat_messages
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
+            ).fetchone()[0]
+        )
+        timestamp = current_timestamp()
+        cursor = connection.execute(
+            """
+            INSERT INTO chat_messages (chat_id, sequence_number, role, content, board_state_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (chat_id, next_sequence_number, role, content, board_state_id, timestamp),
+        )
+        connection.execute(
+            """
+            UPDATE chats
+            SET updated_at = ?
+            WHERE id = ?
+            """,
+            (timestamp, chat_id),
+        )
+        row = connection.execute(
+            """
+            SELECT id, sequence_number, role, content
+            FROM chat_messages
+            WHERE id = ?
+            """,
+            (int(cursor.lastrowid),),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Chat message insert failed.")
+        return row
+
+    def _chat_message_from_row(self, row: sqlite3.Row) -> ChatMessageRecord:
+        return ChatMessageRecord(
+            id=int(row["id"]),
+            sequence_number=int(row["sequence_number"]),
+            role=row["role"],
+            content=row["content"],
+        )

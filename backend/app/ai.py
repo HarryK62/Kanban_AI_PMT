@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import httpx
 from fastapi import HTTPException
@@ -24,6 +25,9 @@ class OpenRouterClient:
         return await self.complete(CONNECTIVITY_PROMPT)
 
     async def complete(self, prompt: str) -> str:
+        return await self.complete_messages([{"role": "user", "content": prompt}])
+
+    async def complete_messages(self, messages: list[dict[str, str]]) -> str:
         if not self.api_key:
             raise HTTPException(
                 status_code=500,
@@ -32,7 +36,7 @@ class OpenRouterClient:
 
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": 0,
         }
         headers = {
@@ -68,3 +72,30 @@ class OpenRouterClient:
                 status_code=502,
                 detail="OpenRouter response was malformed.",
             ) from None
+
+
+def build_chat_messages(
+    history: list[dict[str, str]],
+    board_json: dict[str, Any],
+) -> list[dict[str, str]]:
+    system_prompt = (
+        "You are helping manage a kanban board. "
+        "Return only JSON with this shape: "
+        '{"reply":"string","board_update":null} or '
+        '{"reply":"string","board_update":{"kind":"replace_board","board":{...}}}. '
+        "If you change the board, return the full next board. "
+        "If you do not change the board, set board_update to null. "
+        "The board must remain valid: column ids unique, each referenced card must exist, "
+        "each card appears in exactly one column, and each card key must match its id."
+    )
+    board_context = {
+        "role": "system",
+        "content": f"Current board JSON: {json_dumps(board_json)}",
+    }
+    return [{"role": "system", "content": system_prompt}, board_context, *history]
+
+
+def json_dumps(value: Any) -> str:
+    import json
+
+    return json.dumps(value, separators=(",", ":"))

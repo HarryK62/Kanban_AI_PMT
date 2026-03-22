@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -46,4 +48,39 @@ class Board(BaseModel):
 
 class BoardRecord(BaseModel):
     username: str
+    current_board_state_id: int
     board: Board
+
+
+class ChatMessageCreate(BaseModel):
+    message: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_message(self) -> "ChatMessageCreate":
+        if not self.message.strip():
+            raise ValueError("Message must not be blank.")
+        return self
+
+
+class ChatMessageRecord(BaseModel):
+    id: int
+    sequence_number: int
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatReply(BaseModel):
+    chat_id: int
+    assistant_message: ChatMessageRecord
+    current_board_state_id: int
+    board: Board
+
+
+class AiBoardUpdate(BaseModel):
+    kind: Literal["replace_board"]
+    board: Board
+
+
+class AiStructuredReply(BaseModel):
+    reply: str = Field(min_length=1)
+    board_update: AiBoardUpdate | None = None

@@ -12,6 +12,7 @@ describe("AppShell", () => {
         return new Response(
           JSON.stringify({
             username: "user",
+            current_board_state_id: 2,
             board: currentBoard,
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
@@ -21,6 +22,7 @@ describe("AppShell", () => {
       return new Response(
         JSON.stringify({
           username: "user",
+          current_board_state_id: 1,
           board: currentBoard,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }

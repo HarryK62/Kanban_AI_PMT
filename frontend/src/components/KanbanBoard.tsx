@@ -22,6 +22,7 @@ type KanbanBoardProps = {
 
 type BoardResponse = {
   username: string;
+  current_board_state_id: number;
   board: BoardData;
 };
 
