@@ -11,6 +11,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { AiChatSidebar } from "@/components/AiChatSidebar";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
@@ -26,11 +27,34 @@ type BoardResponse = {
   board: BoardData;
 };
 
+type ChatReply = {
+  assistant_message: {
+    id: number;
+    content: string;
+    role: "assistant";
+    sequence_number: number;
+  };
+  board: BoardData;
+  chat_id: number;
+  current_board_state_id: number;
+};
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
+const chatMessagesSessionKey = (username: string) => `pm:chatMessages:${username}`;
+
 export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatErrorMessage, setChatErrorMessage] = useState("");
+  const [isChatSubmitting, setIsChatSubmitting] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -66,6 +90,31 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
       isActive = false;
     };
   }, [username]);
+
+  useEffect(() => {
+    const storedChatMessages = window.sessionStorage.getItem(
+      chatMessagesSessionKey(username)
+    );
+    if (!storedChatMessages) {
+      setChatMessages([]);
+      return;
+    }
+
+    try {
+      const parsedChatMessages = JSON.parse(storedChatMessages) as ChatMessage[];
+      setChatMessages(parsedChatMessages);
+    } catch {
+      window.sessionStorage.removeItem(chatMessagesSessionKey(username));
+      setChatMessages([]);
+    }
+  }, [username]);
+
+  useEffect(() => {
+    window.sessionStorage.setItem(
+      chatMessagesSessionKey(username),
+      JSON.stringify(chatMessages)
+    );
+  }, [chatMessages, username]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -164,6 +213,45 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
+  const handleChatSubmit = async (message: string) => {
+    const userMessage = {
+      id: createId("chat"),
+      role: "user" as const,
+      content: message,
+    };
+    setChatMessages((currentMessages) => [...currentMessages, userMessage]);
+    setChatErrorMessage("");
+    setIsChatSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/chat/${username}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message }),
+      });
+      if (!response.ok) {
+        throw new Error("Unable to send chat message.");
+      }
+
+      const data = (await response.json()) as ChatReply;
+      setBoard(data.board);
+      setChatMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          id: `assistant-${data.assistant_message.id}`,
+          role: "assistant",
+          content: data.assistant_message.content,
+        },
+      ]);
+    } catch {
+      setChatErrorMessage("Unable to reach the AI right now.");
+    } finally {
+      setIsChatSubmitting(false);
+    }
+  };
+
   return (
     <div className="relative overflow-hidden">
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
@@ -225,32 +313,48 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
           </div>
         </header>
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <section className="grid gap-6 lg:grid-cols-5" aria-busy={isLoading}>
-            {board.columns.map((column) => (
-              <KanbanColumn
-                key={column.id}
-                column={column}
-                cards={column.cardIds.map((cardId) => board.cards[cardId])}
-                onRename={handleRenameColumn}
-                onAddCard={handleAddCard}
-                onDeleteCard={handleDeleteCard}
-              />
-            ))}
-          </section>
-          <DragOverlay>
-            {activeCard ? (
-              <div className="w-[260px]">
-                <KanbanCardPreview card={activeCard} />
+        <section className="grid gap-6 grid-cols-[minmax(0,1fr)_320px]">
+          <div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="overflow-x-auto pb-2">
+                <section className="flex min-w-max gap-4" aria-busy={isLoading}>
+                  {board.columns.map((column) => (
+                    <div key={column.id} className="w-[220px] shrink-0">
+                      <KanbanColumn
+                        column={column}
+                        cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                        onRename={handleRenameColumn}
+                        onAddCard={handleAddCard}
+                        onDeleteCard={handleDeleteCard}
+                      />
+                    </div>
+                  ))}
+                </section>
               </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+              <DragOverlay>
+                {activeCard ? (
+                  <div className="w-[260px]">
+                    <KanbanCardPreview card={activeCard} />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </div>
+
+          <div className="sticky top-8 self-start">
+            <AiChatSidebar
+              errorMessage={chatErrorMessage}
+              isSubmitting={isChatSubmitting}
+              messages={chatMessages}
+              onSubmit={handleChatSubmit}
+            />
+          </div>
+        </section>
       </main>
     </div>
   );

@@ -9,6 +9,7 @@ Use SQLite with:
 - a relational `chats` table
 - a relational `chat_messages` table
 - each chat message linked to the board state visible for that turn
+- a fresh active chat thread created when the user starts a new login session
 
 This keeps the chat session explicit, keeps message ordering explicit, and ties each turn to the board context that actually existed when that turn happened.
 
@@ -33,7 +34,8 @@ Columns:
 
 Notes:
 
-- For the MVP, each user has one active chat.
+- For the MVP, each user has one active chat at a time.
+- Each login starts a fresh active chat for that user by replacing the prior active chat thread.
 - A future "new chat" action can create another row without redesigning the schema.
 
 ### `chat_messages`
@@ -123,14 +125,14 @@ That means:
 - each message also has an explicit associated board state
 - a new chat starts a new context thread
 
-For the MVP, there is one active chat per user.
+For the MVP, there is one active chat per user session.
 
 ## MVP behavior
 
 For the MVP:
 
-1. get or create the user's board and current board state
-2. get or create the user's single active chat
+1. when the user logs in, create a fresh active chat for that session
+2. get or create the user's board and current board state
 3. append the user's message with the next `sequence_number` and the current `board_state_id`
 4. load the full ordered message history for that chat as AI context
 5. send the history, the current board snapshot, and the latest user message to the AI
@@ -141,7 +143,7 @@ For the MVP:
 10. move `boards.current_board_state_id` to the new board state
 11. append the assistant message pointing to the new `board_state_id`
 
-This keeps every chat turn tied to a concrete board snapshot.
+This keeps every chat turn tied to a concrete board snapshot while bounding AI context to the current login session.
 
 ## AI mutation rule
 
@@ -168,7 +170,7 @@ The proposed MVP design is:
 
 - SQLite database
 - `chats` and `chat_messages` relational tables
-- one active chat per user for the MVP
+- one fresh active chat per login session for the MVP
 - message ordering enforced with `UNIQUE(chat_id, sequence_number)`
 - each message linked to a `board_state_id`
 - AI allowed to produce any valid next board state

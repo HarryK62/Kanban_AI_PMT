@@ -2,6 +2,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+MVP_COLUMN_IDS = [
+    "col-backlog",
+    "col-discovery",
+    "col-progress",
+    "col-review",
+    "col-done",
+]
+
 
 class Card(BaseModel):
     id: str
@@ -26,6 +34,9 @@ class Board(BaseModel):
     @model_validator(mode="after")
     def validate_consistency(self) -> "Board":
         column_ids = [column.id for column in self.columns]
+        if column_ids != MVP_COLUMN_IDS:
+            raise ValueError("Board must preserve the fixed MVP columns and order.")
+
         if len(column_ids) != len(set(column_ids)):
             raise ValueError("Column ids must be unique.")
 
@@ -74,6 +85,10 @@ class ChatReply(BaseModel):
     assistant_message: ChatMessageRecord
     current_board_state_id: int
     board: Board
+
+
+class ChatSessionRecord(BaseModel):
+    chat_id: int
 
 
 class AiBoardUpdate(BaseModel):

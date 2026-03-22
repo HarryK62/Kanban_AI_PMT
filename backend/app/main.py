@@ -12,6 +12,7 @@ from app.models import (
     BoardRecord,
     ChatMessageCreate,
     ChatReply,
+    ChatSessionRecord,
 )
 from app.repository import BoardRepository
 
@@ -221,6 +222,11 @@ def create_app(
             current_board_state_id=next_board_state_id,
             board=next_board,
         )
+
+    @app.post("/api/chat/{username}/session", response_model=ChatSessionRecord)
+    async def start_chat_session(username: str) -> ChatSessionRecord:
+        chat_id = repository.reset_chat_session(username)
+        return ChatSessionRecord(chat_id=chat_id)
 
     @app.post("/api/ai/test", response_model=AiTestResponse)
     async def ai_connectivity_test() -> AiTestResponse:

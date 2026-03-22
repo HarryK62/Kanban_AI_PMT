@@ -330,6 +330,51 @@ class BoardRepository:
             )
             return int(cursor.lastrowid)
 
+    def reset_chat_session(self, username: str) -> int:
+        self.initialize()
+
+        with self.connect() as connection:
+            user_id = self._get_or_create_user(connection, username)
+            board_row = self._read_current_board_row(connection, user_id)
+            if board_row is None:
+                self._create_board(connection, user_id, default_board())
+
+            existing_chat_row = connection.execute(
+                """
+                SELECT id
+                FROM chats
+                WHERE user_id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if existing_chat_row is not None:
+                existing_chat_id = int(existing_chat_row["id"])
+                connection.execute(
+                    """
+                    DELETE FROM chat_messages
+                    WHERE chat_id = ?
+                    """,
+                    (existing_chat_id,),
+                )
+                connection.execute(
+                    """
+                    DELETE FROM chats
+                    WHERE id = ?
+                    """,
+                    (existing_chat_id,),
+                )
+
+            timestamp = current_timestamp()
+            cursor = connection.execute(
+                """
+                INSERT INTO chats (user_id, created_at, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (user_id, timestamp, timestamp),
+            )
+            return int(cursor.lastrowid)
+
     def list_chat_history(self, username: str) -> list[dict[str, str]]:
         self.initialize()
 

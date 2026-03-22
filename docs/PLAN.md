@@ -328,18 +328,18 @@ The plan therefore changed from a single mutable board document to a revisioned 
 
 ### Checklist
 
-- [ ] Write a short design note in `docs/` describing chat persistence and sequencing.
-- [ ] Define the database schema for `chats` and `chat_messages`.
-- [ ] Define how message ordering is represented and enforced.
-- [ ] Define how each message relates to a visible `board_state_id`.
-- [ ] Get explicit user sign-off on the chat design before implementing it.
-- [ ] Define backend request and response models for AI chat.
-- [ ] Send the current board snapshot, conversation history, and latest user message to the AI.
-- [ ] Instruct the AI to return the agreed structured output.
-- [ ] Validate the AI response structure.
-- [ ] Validate any returned board against the board JSON schema.
-- [ ] Persist a new board state only if validation succeeds.
-- [ ] Return both the assistant reply and the resulting board state to the frontend.
+- [x] Write a short design note in `docs/` describing chat persistence and sequencing.
+- [x] Define the database schema for `chats` and `chat_messages`.
+- [x] Define how message ordering is represented and enforced.
+- [x] Define how each message relates to a visible `board_state_id`.
+- [x] Get explicit user sign-off on the chat design before implementing it.
+- [x] Define backend request and response models for AI chat.
+- [x] Send the current board snapshot, conversation history, and latest user message to the AI.
+- [x] Instruct the AI to return the agreed structured output.
+- [x] Validate the AI response structure.
+- [x] Validate any returned board against the board JSON schema.
+- [x] Persist a new board state only if validation succeeds.
+- [x] Return both the assistant reply and the resulting board state to the frontend.
 
 ### Tests
 
@@ -363,8 +363,10 @@ The plan therefore changed from a single mutable board document to a revisioned 
 
 ### Checklist
 
+- [ ] Update the chat flow so each login starts a fresh backend chat session for that user.
+- [ ] Keep backend chat persistence for the active session only; do not load prior session history into the UI.
 - [ ] Design and implement a sidebar chat UI that fits the existing product style.
-- [ ] Add message history rendering and message input.
+- [ ] Render only the current page session's messages in the sidebar and provide a message input.
 - [ ] Connect the sidebar to the backend AI route.
 - [ ] Show request progress and error states.
 - [ ] Refresh or replace board state automatically after valid AI updates.
@@ -373,6 +375,7 @@ The plan therefore changed from a single mutable board document to a revisioned 
 ### Tests
 
 - Frontend component/integration tests for chat UI behavior.
+- Backend tests for starting a fresh chat session and clearing prior session context.
 - Playwright end-to-end tests covering:
   - open app and log in
   - send a chat request
@@ -383,7 +386,8 @@ The plan therefore changed from a single mutable board document to a revisioned 
 ### Success criteria
 
 - The user can chat with the AI from the board page.
-- AI replies are visible in the sidebar.
+- Logging in starts a fresh backend chat context for that user.
+- AI replies are visible in the sidebar for the current page session.
 - Valid AI board changes are reflected in the board automatically.
 
 ## Sequence gates

@@ -6,6 +6,15 @@ import { initialData, type BoardData } from "@/lib/kanban";
 describe("AppShell", () => {
   let currentBoard: BoardData;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof input === "string" && input.endsWith("/api/chat/user/session")) {
+      return new Response(
+        JSON.stringify({
+          chat_id: 1,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     if (typeof input === "string" && input.endsWith("/api/board/user")) {
       if (init?.method === "PUT" && init.body) {
         currentBoard = JSON.parse(String(init.body)) as BoardData;
@@ -49,7 +58,7 @@ describe("AppShell", () => {
 
     expect(screen.getByRole("heading", { name: /sign in to open your board/i })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Kanban Studio" })).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("authenticates with the valid credentials", async () => {
@@ -60,6 +69,7 @@ describe("AppShell", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/user/session", { method: "POST" });
   });
 
   it("shows an error for invalid credentials", async () => {
@@ -85,6 +95,15 @@ describe("AppShell", () => {
     await userEvent.click(screen.getByRole("button", { name: /log out/i }));
 
     expect(screen.getByRole("heading", { name: /sign in to open your board/i })).toBeInTheDocument();
+  });
+
+  it("restores the current tab session after reload", async () => {
+    window.sessionStorage.setItem("pm:isAuthenticated", "true");
+
+    render(<AppShell />);
+
+    expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/chat/user/session", { method: "POST" });
   });
 
   it("keeps the same board after logout and login in the same tab", async () => {

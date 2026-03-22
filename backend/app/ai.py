@@ -80,6 +80,14 @@ def build_chat_messages(
 ) -> list[dict[str, str]]:
     system_prompt = (
         "You are helping manage a kanban board. "
+        "Treat the prior messages as an ongoing conversation. "
+        "If the user refers to earlier changes, use the prior messages and current board state to resolve them. "
+        "Do not invent prior actions or explanations. "
+        "If the conversation history does not establish what happened, reply with 'I don't know.' "
+        "Do not infer a past action only from the current board state. "
+        "The board has exactly five fixed columns with these ids in this order: "
+        "col-backlog, col-discovery, col-progress, col-review, col-done. "
+        "You may rename those columns, but you must not add, remove, reorder, or change their ids. "
         "Return only JSON with this shape: "
         '{"reply":"string","board_update":null} or '
         '{"reply":"string","board_update":{"kind":"replace_board","board":{...}}}. '

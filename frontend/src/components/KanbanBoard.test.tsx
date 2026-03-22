@@ -7,6 +7,28 @@ const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
 describe("KanbanBoard", () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof input === "string" && input.endsWith("/api/chat/user/messages")) {
+      return new Response(
+        JSON.stringify({
+          chat_id: 1,
+          current_board_state_id: 2,
+          assistant_message: {
+            id: 2,
+            sequence_number: 2,
+            role: "assistant",
+            content: "I renamed Backlog to Ideas.",
+          },
+          board: {
+            ...initialData,
+            columns: initialData.columns.map((column) =>
+              column.id === "col-backlog" ? { ...column, title: "Ideas" } : column
+            ),
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     if (typeof input === "string" && input.endsWith("/api/board/user")) {
       if (init?.method === "PUT" && init.body) {
         return new Response(
@@ -31,6 +53,7 @@ describe("KanbanBoard", () => {
   });
 
   beforeEach(() => {
+    window.sessionStorage.clear();
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockClear();
   });
@@ -82,5 +105,53 @@ describe("KanbanBoard", () => {
     await waitFor(() =>
       expect(within(column).queryByText("New card")).not.toBeInTheDocument()
     );
+  });
+
+  it("sends a chat message and applies the returned board update", async () => {
+    render(<KanbanBoard username="user" />);
+    await screen.findByText("Backlog");
+
+    await userEvent.type(screen.getByLabelText("Message"), "Rename Backlog to Ideas.");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText("I renamed Backlog to Ideas.")).toBeInTheDocument()
+    );
+    expect(screen.getByText("Ideas")).toBeInTheDocument();
+  });
+
+  it("submits the chat form when enter is pressed", async () => {
+    render(<KanbanBoard username="user" />);
+    await screen.findByText("Backlog");
+
+    await userEvent.type(screen.getByLabelText("Message"), "Rename Backlog to Ideas.{enter}");
+
+    await waitFor(() =>
+      expect(screen.getByText("I renamed Backlog to Ideas.")).toBeInTheDocument()
+    );
+  });
+
+  it("restores visible chat history after reload in the same tab", async () => {
+    window.sessionStorage.setItem(
+      "pm:chatMessages:user",
+      JSON.stringify([
+        {
+          id: "user-1",
+          role: "user",
+          content: "Rename Backlog to Ideas.",
+        },
+        {
+          id: "assistant-2",
+          role: "assistant",
+          content: "I renamed Backlog to Ideas.",
+        },
+      ])
+    );
+
+    render(<KanbanBoard username="user" />);
+    await screen.findByText("Backlog");
+
+    expect(screen.getByText("Rename Backlog to Ideas.")).toBeInTheDocument();
+    expect(screen.getByText("I renamed Backlog to Ideas.")).toBeInTheDocument();
   });
 });

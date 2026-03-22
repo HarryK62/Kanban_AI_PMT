@@ -1,43 +1,84 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
 
 const VALID_USERNAME = "user";
 const VALID_PASSWORD = "password";
+const AUTHENTICATED_SESSION_KEY = "pm:isAuthenticated";
+const CHAT_MESSAGES_SESSION_KEY = `pm:chatMessages:${VALID_USERNAME}`;
 
 export const AppShell = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [sessionKey, setSessionKey] = useState(0);
+  const [isStartingSession, setIsStartingSession] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    const hasAuthenticatedSession =
+      window.sessionStorage.getItem(AUTHENTICATED_SESSION_KEY) === "true";
+    if (hasAuthenticatedSession) {
+      setIsAuthenticated(true);
+    }
+    setIsRestoringSession(false);
+  }, []);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (username === VALID_USERNAME && password === VALID_PASSWORD) {
-      setIsAuthenticated(true);
-      setErrorMessage("");
-      setPassword("");
+    if (username !== VALID_USERNAME || password !== VALID_PASSWORD) {
+      setErrorMessage("Use username 'user' and password 'password'.");
       return;
     }
 
-    setErrorMessage("Use username 'user' and password 'password'.");
+    setIsStartingSession(true);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch(`/api/chat/${VALID_USERNAME}/session`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to start AI chat session.");
+      }
+
+      setIsAuthenticated(true);
+      window.sessionStorage.setItem(AUTHENTICATED_SESSION_KEY, "true");
+      window.sessionStorage.removeItem(CHAT_MESSAGES_SESSION_KEY);
+      setSessionKey((currentKey) => currentKey + 1);
+      setPassword("");
+    } catch {
+      setErrorMessage("Unable to start your session right now.");
+    } finally {
+      setIsStartingSession(false);
+    }
   };
 
   const handleLogout = () => {
+    window.sessionStorage.removeItem(AUTHENTICATED_SESSION_KEY);
+    window.sessionStorage.removeItem(CHAT_MESSAGES_SESSION_KEY);
     setIsAuthenticated(false);
     setUsername("");
     setPassword("");
     setErrorMessage("");
   };
 
+  if (isRestoringSession) {
+    return null;
+  }
+
   return (
     <div className="relative">
-      <div hidden={!isAuthenticated}>
-        <KanbanBoard onLogout={handleLogout} username={VALID_USERNAME} />
-      </div>
-      <div hidden={isAuthenticated}>
+      {isAuthenticated ? (
+        <KanbanBoard
+          key={sessionKey}
+          onLogout={handleLogout}
+          username={VALID_USERNAME}
+        />
+      ) : (
         <div className="relative overflow-hidden">
           <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
           <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
@@ -119,15 +160,16 @@ export const AppShell = () => {
                 ) : null}
                 <button
                   type="submit"
+                  disabled={isStartingSession}
                   className="mt-6 w-full rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110"
                 >
-                  Sign in
+                  {isStartingSession ? "Opening board..." : "Sign in"}
                 </button>
               </form>
             </section>
           </main>
         </div>
-      </div>
+      )}
     </div>
   );
 };

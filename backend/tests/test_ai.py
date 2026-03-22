@@ -71,6 +71,9 @@ def test_build_chat_messages_adds_system_and_board_context() -> None:
 
     assert messages[0]["role"] == "system"
     assert "Return only JSON" in messages[0]["content"]
+    assert "Treat the prior messages as an ongoing conversation." in messages[0]["content"]
+    assert "If the conversation history does not establish what happened, reply with 'I don't know.'" in messages[0]["content"]
+    assert "You may rename those columns, but you must not add, remove, reorder, or change their ids." in messages[0]["content"]
     assert messages[1]["role"] == "system"
     assert "Current board JSON:" in messages[1]["content"]
     assert messages[2] == {"role": "user", "content": "Move the card."}

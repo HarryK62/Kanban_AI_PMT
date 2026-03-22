@@ -153,6 +153,20 @@ def test_board_replace_rejects_invalid_payload(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
+def test_board_replace_rejects_missing_fixed_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.db"
+    client = TestClient(
+        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
+    )
+
+    board_payload = default_board().model_dump(by_alias=True)
+    board_payload["columns"] = board_payload["columns"][:1]
+
+    response = client.put("/api/board/user", json=board_payload)
+
+    assert response.status_code == 422
+
+
 def test_chat_message_route_rejects_invalid_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "app.db"
     client = TestClient(
@@ -197,6 +211,54 @@ def test_chat_message_route_returns_no_op_reply(tmp_path: Path) -> None:
         "role": "user",
         "content": "Move the analytics task to In Progress.",
     }
+
+
+def test_chat_session_route_resets_existing_chat_context(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.db"
+    first_ai_client = FakeAiClient('{"reply":"Done.","board_update":null}')
+    client = TestClient(
+        create_app(
+            frontend_out_dir=Path("/tmp/does-not-exist"),
+            db_path=db_path,
+            ai_client=first_ai_client,
+        )
+    )
+
+    first_response = client.post(
+        "/api/chat/user/messages",
+        json={"message": "First session message."},
+    )
+
+    assert first_response.status_code == 200
+
+    reset_response = client.post("/api/chat/user/session")
+    assert reset_response.status_code == 200
+    reset_chat_id = reset_response.json()["chat_id"]
+
+    second_ai_client = FakeAiClient('{"reply":"Fresh context.","board_update":null}')
+    client = TestClient(
+        create_app(
+            frontend_out_dir=Path("/tmp/does-not-exist"),
+            db_path=db_path,
+            ai_client=second_ai_client,
+        )
+    )
+    second_response = client.post(
+        "/api/chat/user/messages",
+        json={"message": "Second session message."},
+    )
+
+    assert second_response.status_code == 200
+    assert second_response.json()["chat_id"] == reset_chat_id
+    assert second_ai_client.messages is not None
+    assert second_ai_client.messages[-1] == {
+        "role": "user",
+        "content": "Second session message.",
+    }
+    assert all(
+        message["content"] != "First session message."
+        for message in second_ai_client.messages
+    )
 
 
 def test_chat_message_route_persists_board_update(tmp_path: Path) -> None:
@@ -250,6 +312,43 @@ def test_chat_message_route_persists_board_update(tmp_path: Path) -> None:
         (1, "user", "Rename In Progress to Doing.", 1),
         (2, "assistant", "I renamed In Progress to Doing.", 2),
     ]
+
+
+def test_chat_message_route_rejects_ai_board_with_missing_fixed_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.db"
+    invalid_board = default_board().model_dump(by_alias=True)
+    invalid_board["columns"] = invalid_board["columns"][:1]
+    ai_client = FakeAiClient(
+        json.dumps(
+            {
+                "reply": "I simplified the board.",
+                "board_update": {
+                    "kind": "replace_board",
+                    "board": invalid_board,
+                },
+            }
+        )
+    )
+    client = TestClient(
+        create_app(
+            frontend_out_dir=Path("/tmp/does-not-exist"),
+            db_path=db_path,
+            ai_client=ai_client,
+        )
+    )
+
+    response = client.post(
+        "/api/chat/user/messages",
+        json={"message": "Collapse this board to one column."},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "AI response was malformed."}
+
+    follow_up_response = client.get("/api/board/user")
+    assert follow_up_response.status_code == 200
+    assert follow_up_response.json()["current_board_state_id"] == 1
+    assert follow_up_response.json()["board"] == default_board().model_dump(by_alias=True)
 
 
 def test_chat_message_route_rejects_malformed_ai_reply(tmp_path: Path) -> None:
