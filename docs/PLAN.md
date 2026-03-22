@@ -8,7 +8,7 @@ This document is the execution plan for the Project Management MVP. It breaks th
 - The frontend starts from the existing Next.js demo in `frontend/`.
 - The backend will be a FastAPI app in `backend/`.
 - Authentication begins as a frontend-only gate in the phase before frontend/backend integration.
-- The persistent board state will be stored in SQLite as a JSON document, wrapped by a minimal relational schema.
+- The persistent board state will be stored in SQLite as immutable board snapshots with a current-state pointer.
 - AI calls will use OpenRouter with model `openai/gpt-oss-120b`.
 - Each part should be completed and verified before moving to the next part.
 
@@ -23,11 +23,17 @@ This document is the execution plan for the Project Management MVP. It breaks th
 - `boards` table
   - `id`
   - `user_id` unique
-  - `board_json` text or SQLite JSON column usage
+  - `current_board_state_id`
   - `created_at`
   - `updated_at`
+- `board_states` table
+  - `id`
+  - `board_id`
+  - `previous_board_state_id`
+  - `board_json`
+  - `created_at`
 
-This keeps identity relational and keeps the kanban board as a single JSON document, which is the simplest fit for the MVP.
+This keeps board identity relational while making each board state immutable and addressable. That fits chat context better and supports future undo/redo without switching persistence models later.
 
 ### Board JSON schema
 
@@ -53,6 +59,7 @@ This keeps identity relational and keeps the kanban board as a single JSON docum
 ```
 
 Notes:
+
 - `columns` preserves visible column order.
 - `cardIds` preserves card order within a column.
 - `cards` is a dictionary keyed by card id for simple updates.
@@ -78,15 +85,28 @@ The backend AI route should eventually return a single structured payload with b
 ```
 
 Rules:
+
 - `reply` is always required.
 - `board_update` is optional.
 - For the MVP, `board_update.kind` should be `replace_board`.
 - The backend validates the full returned board against the app's board schema before saving it.
 
 Reasoning:
-- A full-board replacement is simpler and more reliable than incremental patches for the MVP.
+
+- Returning a full next-board snapshot is simpler and more reliable than incremental patches for the MVP.
 - Validation stays straightforward.
 - The UI refresh logic becomes deterministic after AI actions.
+- The validated result can be persisted as a new immutable board state.
+
+## Architecture note
+
+After the original persistence design was approved, the domain model became clearer during chat design. In particular:
+
+- each chat message needs an explicit relationship to the board state visible at that turn
+- future undo and redo need board revision history
+- immutable board snapshots are a better fit than a single mutable `boards.board_json`
+
+The plan therefore changed from a single mutable board document to a revisioned `board_states` model before Part 9 implementation.
 
 ## Part 1: Plan and Documentation
 
@@ -206,7 +226,7 @@ Reasoning:
 ### Checklist
 
 - [x] Write a short design note in `docs/` describing the SQLite storage approach.
-- [x] Define the database schema for `users` and `boards`.
+- [x] Define the database schema for `users`, `boards`, and `board_states`.
 - [x] Define the JSON schema for the board document.
 - [x] Document how a default board is created for a new user.
 - [x] Document how versioning and future board migrations would work.
@@ -228,7 +248,7 @@ Reasoning:
 
 - [x] Add SQLite initialization on backend startup or first use.
 - [x] Create tables if they do not already exist.
-- [x] Implement backend model/service helpers for loading and saving board JSON.
+- [x] Implement backend model/service helpers for loading and saving board state.
 - [x] Implement API routes to fetch the current user's board.
 - [x] Implement API routes to replace the current user's board.
 - [x] Return consistent JSON responses and clear error handling.
@@ -308,16 +328,22 @@ Reasoning:
 
 ### Checklist
 
+- [ ] Write a short design note in `docs/` describing chat persistence and sequencing.
+- [ ] Define the database schema for `chats` and `chat_messages`.
+- [ ] Define how message ordering is represented and enforced.
+- [ ] Define how each message relates to a visible `board_state_id`.
+- [ ] Get explicit user sign-off on the chat design before implementing it.
 - [ ] Define backend request and response models for AI chat.
-- [ ] Send the current board JSON, conversation history, and latest user message to the AI.
+- [ ] Send the current board snapshot, conversation history, and latest user message to the AI.
 - [ ] Instruct the AI to return the agreed structured output.
 - [ ] Validate the AI response structure.
 - [ ] Validate any returned board against the board JSON schema.
-- [ ] Persist the board only if validation succeeds.
+- [ ] Persist a new board state only if validation succeeds.
 - [ ] Return both the assistant reply and the resulting board state to the frontend.
 
 ### Tests
 
+- Manual review of the chat design doc for clarity and MVP scope.
 - Backend unit tests for:
   - structured response parsing
   - board validation success
@@ -328,6 +354,7 @@ Reasoning:
 
 ### Success criteria
 
+- The chat persistence design is documented and approved.
 - The backend can safely accept AI-generated board updates.
 - Invalid AI output never corrupts stored board state.
 - The API contract is deterministic for the frontend.
@@ -365,6 +392,7 @@ The following approvals are required before proceeding:
 
 - After Part 1: user approves this plan.
 - After Part 5: user approves the database design note.
+- Before Part 9 implementation: user approves the chat design note.
 
 The following behaviors should remain true throughout execution:
 

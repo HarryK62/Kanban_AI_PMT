@@ -8,17 +8,17 @@ Use SQLite with:
 
 - a relational `users` table
 - a relational `boards` table
-- the full Kanban board stored as a single JSON document in `boards.board_json`
+- a relational `board_states` table containing immutable board snapshots
 
-This is the simplest fit for the current product shape. The board is naturally a nested document with ordered columns, ordered card ids within each column, and card data keyed by id. Normalizing that structure into multiple relational tables would add implementation cost now without a clear MVP benefit.
+This keeps board identity separate from board state. Each board state is an immutable revision of the board at one moment in time, and the board points to its current state.
 
 ## Why this approach
 
-- The current frontend already models the board as one object.
-- The MVP only needs one board per user.
-- Full-board reads and writes are acceptable for the MVP.
-- AI updates will be easier to validate if the backend works with one board document.
-- SQLite handles text storage cleanly, and JSON validation can happen in the backend.
+- The board is naturally modeled as a single object snapshot.
+- Undo and redo require revision history, not just current state.
+- Chat messages need to be associated with the board state that was visible at that turn.
+- Full snapshots are simpler and safer than custom diff logic for the MVP.
+- The backend can still validate the full board document with the current `Board` schema.
 
 ## Database schema
 
@@ -40,14 +40,33 @@ Notes:
 Columns:
 
 - `id` integer primary key
-- `user_id` integer not null references `users(id)`
-- `board_json` text not null
+- `user_id` integer not null unique references `users(id)`
+- `current_board_state_id` integer not null unique references `board_states(id)`
 - `created_at` text not null
 - `updated_at` text not null
 
 Notes:
 
-- `board_json` stores the canonical board state.
+- `boards` is the stable board identity for a user.
+- `current_board_state_id` points to the latest visible board state.
+- One board per user remains the MVP rule.
+
+### `board_states`
+
+Columns:
+
+- `id` integer primary key
+- `board_id` integer not null references `boards(id)`
+- `previous_board_state_id` integer references `board_states(id)`
+- `board_json` text not null
+- `created_at` text not null
+
+Notes:
+
+- `board_states` stores immutable board snapshots.
+- `previous_board_state_id` links revisions into a linear history for the MVP.
+- Undo can move the board's current pointer back to a prior state.
+- Redo can move the pointer forward again as long as that future state is still reachable in the revision chain.
 
 Example DDL:
 
@@ -60,11 +79,22 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS boards (
   id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL,
-  board_json TEXT NOT NULL,
+  user_id INTEGER NOT NULL UNIQUE,
+  current_board_state_id INTEGER NOT NULL UNIQUE,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (current_board_state_id) REFERENCES board_states(id)
+);
+
+CREATE TABLE IF NOT EXISTS board_states (
+  id INTEGER PRIMARY KEY,
+  board_id INTEGER NOT NULL,
+  previous_board_state_id INTEGER,
+  board_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (board_id) REFERENCES boards(id),
+  FOREIGN KEY (previous_board_state_id) REFERENCES board_states(id)
 );
 ```
 
@@ -121,39 +151,48 @@ This matches the current frontend `BoardData` model:
 
 ```ts
 type BoardData = {
+  version: number;
+  title: string;
   columns: Column[];
   cards: Record<string, Card>;
 };
 ```
 
-The only addition for persistence is top-level metadata:
-
-- `version`
-- `title`
-
-That means the backend can preserve the current UI behavior without forcing a frontend redesign.
+The revision model changes how the board is persisted, not the shape exchanged with the frontend.
 
 ## Default board creation
 
 When a user exists but no board exists yet:
 
-1. create a board row for that user
-2. use the current example board as the initial board
-3. set `version` to `1`
-4. set `title` to `"Kanban Studio"`
+1. create a `board_states` row with the default board JSON
+2. create a `boards` row for that user
+3. point `boards.current_board_state_id` to the new board state
+4. set `version` to `1`
+5. set `title` to `"Kanban Studio"`
 
-This should happen lazily on first board fetch or first board write. That keeps startup simple and avoids unnecessary seed logic.
+This should happen lazily on first board fetch or first board write.
 
 ## Update model
 
-For the MVP, board updates should be full-document replacement:
+For the MVP, board updates should create new immutable board states:
 
-- the frontend sends the complete board
+- the frontend or AI produces the complete next board
 - the backend validates it
-- the backend overwrites `board_json`
-- the backend updates `updated_at`
+- the backend inserts a new `board_states` row
+- `previous_board_state_id` points to the board's former current state
+- the backend updates `boards.current_board_state_id`
+- the backend updates `boards.updated_at`
 
-This is intentionally simple. Partial patching can be added later if needed, but it is not necessary for the MVP.
+This preserves history without requiring diff calculation.
+
+## Undo and redo model
+
+This design supports history-aware board navigation:
+
+- undo moves `boards.current_board_state_id` to `previous_board_state_id`
+- redo can move forward to a known later state if the application keeps track of the next state to reapply
+
+For the MVP, explicit undo and redo UI is still out of scope, but the persistence model supports adding it later without redesigning storage.
 
 ## Versioning and migrations
 
@@ -165,20 +204,20 @@ Initial rule:
 
 If the board shape changes later:
 
-1. read stored board JSON
+1. read the targeted board state JSON
 2. inspect `version`
 3. migrate older versions to the latest supported version in backend code
-4. save the migrated result back when appropriate
+4. save the migrated result back as a new board state when appropriate
 
 This avoids needing a normalized schema migration for every board-shape change.
 
 ## Out of scope for MVP
 
-- board history
-- multiple boards per user
+- normalized relational card tables
 - collaborative editing
-- relational card tables
-- audit logs
+- branching board histories
+- diff-based board storage
+- explicit undo and redo UI
 - server-side authentication/session management
 
 ## Approval request
@@ -186,9 +225,10 @@ This avoids needing a normalized schema migration for every board-shape change.
 The proposed MVP design is:
 
 - SQLite database
-- `users` and `boards` relational tables
+- `users`, `boards`, and `board_states` relational tables
 - one board per user
-- full board state stored as JSON in `boards.board_json`
-- backend validation of the board document before persistence
+- immutable board snapshots in `board_states.board_json`
+- `boards.current_board_state_id` as the current-state pointer
+- backend validation of each board snapshot before persistence
 
-This is the design that should be approved before Part 6 implementation starts.
+This is the design that should be approved before backend persistence implementation continues.
