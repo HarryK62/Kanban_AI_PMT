@@ -342,8 +342,10 @@ def test_chat_message_route_rejects_ai_board_with_missing_fixed_columns(tmp_path
         json={"message": "Collapse this board to one column."},
     )
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": "AI response was malformed."}
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["content"] == "I simplified the board."
+    assert response.json()["current_board_state_id"] == 1
+    assert response.json()["board"] == default_board().model_dump(by_alias=True)
 
     follow_up_response = client.get("/api/board/user")
     assert follow_up_response.status_code == 200
@@ -410,8 +412,10 @@ def test_chat_message_route_rejects_invalid_board_update(tmp_path: Path) -> None
         json={"message": "Break the board."},
     )
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": "AI response was malformed."}
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["content"] == "I updated the board."
+    assert response.json()["current_board_state_id"] == 1
+    assert response.json()["board"] == default_board().model_dump(by_alias=True)
 
     with sqlite3.connect(db_path) as connection:
         board_states = connection.execute(
@@ -422,7 +426,10 @@ def test_chat_message_route_rejects_invalid_board_update(tmp_path: Path) -> None
         ).fetchall()
 
     assert board_states == [(1,)]
-    assert chat_messages == [(1, "user", "Break the board.", 1)]
+    assert chat_messages == [
+        (1, "user", "Break the board.", 1),
+        (2, "assistant", "I updated the board.", 1),
+    ]
 
 
 def test_ai_connectivity_route_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -45,8 +45,6 @@ type ChatMessage = {
   content: string;
 };
 
-const chatMessagesSessionKey = (username: string) => `pm:chatMessages:${username}`;
-
 export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -55,6 +53,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatErrorMessage, setChatErrorMessage] = useState("");
   const [isChatSubmitting, setIsChatSubmitting] = useState(false);
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -92,29 +91,8 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   }, [username]);
 
   useEffect(() => {
-    const storedChatMessages = window.sessionStorage.getItem(
-      chatMessagesSessionKey(username)
-    );
-    if (!storedChatMessages) {
-      setChatMessages([]);
-      return;
-    }
-
-    try {
-      const parsedChatMessages = JSON.parse(storedChatMessages) as ChatMessage[];
-      setChatMessages(parsedChatMessages);
-    } catch {
-      window.sessionStorage.removeItem(chatMessagesSessionKey(username));
-      setChatMessages([]);
-    }
+    setChatMessages([]);
   }, [username]);
-
-  useEffect(() => {
-    window.sessionStorage.setItem(
-      chatMessagesSessionKey(username),
-      JSON.stringify(chatMessages)
-    );
-  }, [chatMessages, username]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -252,6 +230,10 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
     }
   };
 
+  const mobileChatLabel = chatMessages.length > 0
+    ? `AI chat (${chatMessages.length})`
+    : "AI chat";
+
   return (
     <div className="relative overflow-hidden">
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
@@ -313,7 +295,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
           </div>
         </header>
 
-        <section className="grid gap-6 grid-cols-[minmax(0,1fr)_320px]">
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div>
             <DndContext
               sensors={sensors}
@@ -346,7 +328,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
             </DndContext>
           </div>
 
-          <div className="sticky top-8 self-start">
+          <div className="sticky top-8 hidden self-start lg:block">
             <AiChatSidebar
               errorMessage={chatErrorMessage}
               isSubmitting={isChatSubmitting}
@@ -355,6 +337,49 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
             />
           </div>
         </section>
+
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setIsMobileChatOpen(true)}
+            className="fixed bottom-5 right-5 z-40 rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-[var(--shadow)] transition hover:brightness-110"
+          >
+            {mobileChatLabel}
+          </button>
+
+          <div
+            className={`fixed inset-0 z-50 transition ${
+              isMobileChatOpen
+                ? "pointer-events-auto"
+                : "pointer-events-none"
+            }`}
+            aria-hidden={!isMobileChatOpen}
+          >
+            <button
+              type="button"
+              onClick={() => setIsMobileChatOpen(false)}
+              className={`absolute inset-0 bg-[rgba(3,33,71,0.45)] transition ${
+                isMobileChatOpen ? "opacity-100" : "opacity-0"
+              }`}
+              aria-label="Close AI chat"
+            />
+            <div
+              className={`absolute inset-x-0 bottom-0 h-[78vh] transform transition-transform duration-300 ${
+                isMobileChatOpen ? "translate-y-0" : "translate-y-full"
+              }`}
+            >
+              {isMobileChatOpen ? (
+                <AiChatSidebar
+                  className="h-full min-h-0 max-h-none rounded-b-none rounded-t-[28px] border-b-0 bg-[var(--surface)]"
+                  errorMessage={chatErrorMessage}
+                  isSubmitting={isChatSubmitting}
+                  messages={chatMessages}
+                  onSubmit={handleChatSubmit}
+                />
+              ) : null}
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );

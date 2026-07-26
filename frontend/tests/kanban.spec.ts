@@ -97,7 +97,9 @@ test("sends a chat request and reflects the returned board update", async ({ pag
   await page.getByRole("button", { name: /send/i }).click();
 
   await expect(page.getByText("I renamed Backlog to Ideas.")).toBeVisible();
-  await expect(page.getByText("Ideas")).toBeVisible();
+  await expect(
+    page.getByTestId("column-col-backlog").getByLabel("Column title")
+  ).toHaveValue("Ideas");
 });
 
 test("adds a card to a column", async ({ page }) => {
@@ -107,13 +109,21 @@ test("adds a card to a column", async ({ page }) => {
   await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
   await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
   await firstColumn.getByRole("button", { name: /add card/i }).click();
-  await expect(firstColumn.getByText("Playwright card")).toBeVisible();
+  await expect(
+    firstColumn.getByRole("heading", { name: "Playwright card" }).first()
+  ).toBeVisible();
 });
 
 test("moves a card between columns", async ({ page }) => {
   await login(page);
-  const card = page.getByTestId("card-card-1");
+  const sourceColumn = page.locator('[data-testid^="column-"]').first();
+  const card = sourceColumn.locator('[data-testid^="card-"]').first();
   const targetColumn = page.getByTestId("column-col-review");
+  const cardTestId = await card.getAttribute("data-testid");
+  if (!cardTestId) {
+    throw new Error("Unable to resolve source card id.");
+  }
+
   const cardBox = await card.boundingBox();
   const columnBox = await targetColumn.boundingBox();
   if (!cardBox || !columnBox) {
@@ -131,7 +141,7 @@ test("moves a card between columns", async ({ page }) => {
     { steps: 12 }
   );
   await page.mouse.up();
-  await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+  await expect(targetColumn.locator(`[data-testid="${cardTestId}"]`)).toBeVisible();
 });
 
 test("logs out back to the login screen", async ({ page }) => {
@@ -152,7 +162,7 @@ test("logs out back to the login screen", async ({ page }) => {
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("password");
   await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByText("Session card")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Session card" }).first()).toBeVisible();
 });
 
 test("loads the persisted board in a new window", async ({ browser, page }) => {
@@ -162,7 +172,7 @@ test("loads the persisted board in a new window", async ({ browser, page }) => {
   await firstColumn.getByPlaceholder("Card title").fill("Tab-only card");
   await firstColumn.getByPlaceholder("Details").fill("Should not appear elsewhere.");
   await firstColumn.getByRole("button", { name: /add card/i }).click();
-  await expect(page.getByText("Tab-only card")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tab-only card" }).first()).toBeVisible();
 
   const secondPage = await browser.newPage();
   await secondPage.goto("/");
@@ -172,6 +182,6 @@ test("loads the persisted board in a new window", async ({ browser, page }) => {
   await secondPage.getByLabel("Username").fill("user");
   await secondPage.getByLabel("Password").fill("password");
   await secondPage.getByRole("button", { name: /sign in/i }).click();
-  await expect(secondPage.getByText("Tab-only card")).toBeVisible();
+  await expect(secondPage.getByRole("heading", { name: "Tab-only card" }).first()).toBeVisible();
   await secondPage.close();
 });

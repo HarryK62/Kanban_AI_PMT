@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -7,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.ai import OPENROUTER_MODEL, OpenRouterClient, build_chat_messages
 from app.models import (
-    AiStructuredReply,
+  AiBoardUpdate,
     Board,
     BoardRecord,
     ChatMessageCreate,
@@ -195,7 +196,10 @@ def create_app(
         )
 
         try:
-            structured_reply = AiStructuredReply.model_validate_json(raw_reply)
+          parsed_reply = json.loads(raw_reply)
+          reply_text = parsed_reply["reply"].strip()
+          if not reply_text:
+            raise ValueError("Reply must not be blank.")
         except Exception:
             raise HTTPException(
                 status_code=502,
@@ -204,16 +208,23 @@ def create_app(
 
         next_board_state_id = current_board_state_id
         next_board = board
-        if structured_reply.board_update is not None:
+        board_update_payload = parsed_reply.get("board_update")
+        if board_update_payload is not None:
+          try:
+            board_update = AiBoardUpdate.model_validate(board_update_payload)
             next_board_state_id, next_board = repository.apply_board_state(
-                username,
-                structured_reply.board_update.board,
+              username,
+              board_update.board,
             )
+          except Exception:
+            # Keep the assistant reply even if the board mutation is invalid.
+            next_board_state_id = current_board_state_id
+            next_board = board
 
         _, assistant_message = repository.append_chat_message(
             username=username,
             role="assistant",
-            content=structured_reply.reply,
+          content=reply_text,
             board_state_id=next_board_state_id,
         )
         return ChatReply(

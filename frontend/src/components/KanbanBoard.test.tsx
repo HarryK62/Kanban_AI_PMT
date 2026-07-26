@@ -131,7 +131,7 @@ describe("KanbanBoard", () => {
     );
   });
 
-  it("restores visible chat history after reload in the same tab", async () => {
+  it("starts with an empty chat view after reload", async () => {
     window.sessionStorage.setItem(
       "pm:chatMessages:user",
       JSON.stringify([
@@ -151,7 +151,10 @@ describe("KanbanBoard", () => {
     render(<KanbanBoard username="user" />);
     await screen.findByText("Backlog");
 
-    expect(screen.getByText("Rename Backlog to Ideas.")).toBeInTheDocument();
-    expect(screen.getByText("I renamed Backlog to Ideas.")).toBeInTheDocument();
+    expect(screen.queryByText("Rename Backlog to Ideas.")).not.toBeInTheDocument();
+    expect(screen.queryByText("I renamed Backlog to Ideas.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/ask the assistant to create, edit, move, or reorganize cards/i)
+    ).toBeInTheDocument();
   });
 });

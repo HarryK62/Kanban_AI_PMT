@@ -15,6 +15,7 @@ type ChatMessage = {
 };
 
 type AiChatSidebarProps = {
+  className?: string;
   errorMessage: string;
   isSubmitting: boolean;
   messages: ChatMessage[];
@@ -22,6 +23,7 @@ type AiChatSidebarProps = {
 };
 
 export const AiChatSidebar = ({
+  className,
   errorMessage,
   isSubmitting,
   messages,
@@ -61,7 +63,9 @@ export const AiChatSidebar = ({
   };
 
   return (
-    <aside className="flex h-full min-h-[540px] max-h-[calc(100vh-5.5rem)] flex-col rounded-[32px] border border-[var(--stroke)] bg-[var(--surface-strong)] p-5 shadow-[var(--shadow)]">
+    <aside
+      className={`flex h-full min-h-[540px] max-h-[calc(100vh-5.5rem)] flex-col rounded-[32px] border border-[var(--stroke)] bg-[var(--surface-strong)] p-5 shadow-[var(--shadow)] ${className ?? ""}`}
+    >
       <div className="border-b border-[var(--stroke)] pb-4">
         <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
           AI Assistant
