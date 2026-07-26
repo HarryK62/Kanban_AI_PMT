@@ -19,7 +19,7 @@ type AiChatSidebarProps = {
   errorMessage: string;
   isSubmitting: boolean;
   messages: ChatMessage[];
-  onSubmit: (message: string) => Promise<void>;
+  onSubmit: (message: string) => Promise<boolean>;
 };
 
 export const AiChatSidebar = ({
@@ -49,8 +49,10 @@ export const AiChatSidebar = ({
       return;
     }
 
-    setMessage("");
-    await onSubmit(trimmedMessage);
+    const didSend = await onSubmit(trimmedMessage);
+    if (didSend) {
+      setMessage("");
+    }
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -64,7 +66,7 @@ export const AiChatSidebar = ({
 
   return (
     <aside
-      className={`flex h-full min-h-[540px] max-h-[calc(100vh-5.5rem)] flex-col rounded-[32px] border border-[var(--stroke)] bg-[var(--surface-strong)] p-5 shadow-[var(--shadow)] ${className ?? ""}`}
+      className={`flex h-full min-h-[500px] max-h-[calc(100vh-5rem)] flex-col rounded-[32px] border border-[var(--stroke)] bg-white p-5 shadow-[var(--shadow)] ${className ?? ""}`}
     >
       <div className="border-b border-[var(--stroke)] pb-4">
         <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
@@ -136,7 +138,7 @@ export const AiChatSidebar = ({
           <button
             type="submit"
             disabled={isSubmitting || !message.trim()}
-            className="ml-auto rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            className="ml-auto rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-80"
           >
             Send
           </button>

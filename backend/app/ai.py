@@ -1,13 +1,19 @@
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import HTTPException
 
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "openai/gpt-oss-120b"
 CONNECTIVITY_PROMPT = "What is 2+2? Reply with just the number."
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
+# Load environment variables from project root for local runs.
+load_dotenv(ROOT_DIR / ".env")
 
 
 class OpenRouterClient:
@@ -17,7 +23,7 @@ class OpenRouterClient:
         model: str = OPENROUTER_MODEL,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        self.api_key = os.getenv("OPENROUTER_API_KEY") if api_key is None else api_key
         self.model = model
         self.http_client = http_client
 

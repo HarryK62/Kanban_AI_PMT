@@ -45,6 +45,9 @@ type ChatMessage = {
   content: string;
 };
 
+const CHAT_REQUEST_TIMEOUT_MS = 20_000;
+const CHAT_UI_FAILSAFE_TIMEOUT_MS = 25_000;
+
 export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -93,6 +96,21 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   useEffect(() => {
     setChatMessages([]);
   }, [username]);
+
+  useEffect(() => {
+    if (!isChatSubmitting) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsChatSubmitting(false);
+      setChatErrorMessage("Unable to reach the AI now.");
+    }, CHAT_UI_FAILSAFE_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isChatSubmitting]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -191,7 +209,11 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
-  const handleChatSubmit = async (message: string) => {
+  const handleChatSubmit = async (message: string): Promise<boolean> => {
+    if (isChatSubmitting) {
+      return false;
+    }
+
     const userMessage = {
       id: createId("chat"),
       role: "user" as const,
@@ -202,13 +224,25 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
     setIsChatSubmitting(true);
 
     try {
-      const response = await fetch(`/api/chat/${username}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message }),
-      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => {
+        controller.abort();
+      }, CHAT_REQUEST_TIMEOUT_MS);
+
+      const response = await (async () => {
+        try {
+          return await fetch(`/api/chat/${username}/messages`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ message }),
+            signal: controller.signal,
+          });
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
+      })();
       if (!response.ok) {
         throw new Error("Unable to send chat message.");
       }
@@ -223,8 +257,14 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
           content: data.assistant_message.content,
         },
       ]);
-    } catch {
-      setChatErrorMessage("Unable to reach the AI right now.");
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setChatErrorMessage("Unable to reach the AI now.");
+      } else {
+        setChatErrorMessage("Unable to reach the AI now.");
+      }
+      return false;
     } finally {
       setIsChatSubmitting(false);
     }
@@ -239,8 +279,8 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
       <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
 
-      <main className="relative mx-auto flex min-h-screen max-w-[1500px] flex-col gap-10 px-6 pb-16 pt-12">
-        <header className="flex flex-col gap-6 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur">
+      <main className="relative mx-auto flex min-h-screen max-w-[1400px] flex-col gap-8 px-5 pb-12 pt-10">
+        <header className="flex flex-col gap-5 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-7 shadow-[var(--shadow)] backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-6">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
@@ -295,7 +335,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div>
             <DndContext
               sensors={sensors}
@@ -304,9 +344,9 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
               onDragEnd={handleDragEnd}
             >
               <div className="overflow-x-auto pb-2">
-                <section className="flex min-w-max gap-4" aria-busy={isLoading}>
+                <section className="flex min-w-max gap-3" aria-busy={isLoading}>
                   {board.columns.map((column) => (
-                    <div key={column.id} className="w-[220px] shrink-0">
+                    <div key={column.id} className="w-[208px] shrink-0">
                       <KanbanColumn
                         column={column}
                         cards={column.cardIds.map((cardId) => board.cards[cardId])}
@@ -320,7 +360,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
               </div>
               <DragOverlay>
                 {activeCard ? (
-                  <div className="w-[260px]">
+                  <div className="w-[244px]">
                     <KanbanCardPreview card={activeCard} />
                   </div>
                 ) : null}
@@ -370,7 +410,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
             >
               {isMobileChatOpen ? (
                 <AiChatSidebar
-                  className="h-full min-h-0 max-h-none rounded-b-none rounded-t-[28px] border-b-0 bg-[var(--surface)]"
+                  className="h-full min-h-0 max-h-none rounded-b-none rounded-t-[28px] border-b-0"
                   errorMessage={chatErrorMessage}
                   isSubmitting={isChatSubmitting}
                   messages={chatMessages}
