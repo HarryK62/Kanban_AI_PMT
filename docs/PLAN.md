@@ -2,6 +2,27 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Additional completed work (2026-07-26)
+
+The following implementation and stabilization work was completed after the initial plan draft and is now part of delivered scope.
+
+- **ADDED:** Hardcoded login credentials changed from `user` / `password` to `harry` / `kijanka`.
+- **ADDED:** Sign-in screen simplified to a single centered form (removed left-side credential panel).
+- **ADDED:** AI chat UX hardening:
+  - request timeout and submit-state failsafe to prevent stuck "submitting" UI
+  - preserve typed message on failed send
+  - consistent user-facing failure text: "Unable to reach the AI now."
+- **ADDED:** Backend runtime reliability for AI calls:
+  - automatic project-root `.env` loading via `python-dotenv`
+  - verified OpenRouter connectivity with live `POST /api/ai/test`
+- **ADDED:** Integration test stabilization:
+  - Playwright locators made robust against duplicate text matches
+  - drag-and-drop test made resilient to non-default board state
+- **ADDED:** Full verification passes completed:
+  - backend test suite
+  - frontend unit tests
+  - Playwright integration tests
+
 ## Working assumptions
 
 - The app is a local-only MVP running in Docker.
@@ -197,6 +218,7 @@ The plan therefore changed from a single mutable board document to a revisioned 
 
 - [x] Add a login screen shown before the board is accessible.
 - [x] Implement hardcoded credential check for `user` / `password`.
+- [x] **ADDED:** Update hardcoded credential check to `harry` / `kijanka`.
 - [x] Store login state on the frontend only for this phase.
 - [x] Add a logout control.
 - [x] Prevent direct access to the board UI until logged in.
@@ -218,7 +240,7 @@ The plan therefore changed from a single mutable board document to a revisioned 
 ### Success criteria
 
 - The user must log in before seeing the board.
-- The only accepted credentials are `user` / `password`.
+- The only accepted credentials are `harry` / `kijanka`.
 - Login and logout are covered by automated tests.
 
 ## Part 5: Database Modeling
@@ -308,6 +330,7 @@ The plan therefore changed from a single mutable board document to a revisioned 
 - [x] Use model `openai/gpt-oss-120b`.
 - [x] Confirm a basic prompt such as `2+2` returns a valid response.
 - [x] Add minimal error handling for missing API key and upstream failures.
+- [x] **ADDED:** Load `.env` automatically from project root in backend runtime so `OPENROUTER_API_KEY` is available during local runs.
 
 ### Tests
 
@@ -363,14 +386,18 @@ The plan therefore changed from a single mutable board document to a revisioned 
 
 ### Checklist
 
-- [ ] Update the chat flow so each login starts a fresh backend chat session for that user.
-- [ ] Keep backend chat persistence for the active session only; do not load prior session history into the UI.
-- [ ] Design and implement a sidebar chat UI that fits the existing product style.
-- [ ] Render only the current page session's messages in the sidebar and provide a message input.
-- [ ] Connect the sidebar to the backend AI route.
-- [ ] Show request progress and error states.
-- [ ] Refresh or replace board state automatically after valid AI updates.
-- [ ] Keep the UI responsive on desktop and mobile widths.
+- [x] Update the chat flow so each login starts a fresh backend chat session for that user.
+- [x] Keep backend chat persistence for the active session only; do not load prior session history into the UI.
+- [x] Design and implement a sidebar chat UI that fits the existing product style.
+- [x] Render only the current page session's messages in the sidebar and provide a message input.
+- [x] Connect the sidebar to the backend AI route.
+- [x] Show request progress and error states.
+- [x] Refresh or replace board state automatically after valid AI updates.
+- [x] Keep the UI responsive on desktop and mobile widths.
+- [x] **ADDED:** Implement mobile bottom-sheet chat entry point.
+- [x] **ADDED:** Preserve assistant reply when AI board update is invalid; ignore only invalid board mutation.
+- [x] **ADDED:** Add chat request timeout and UI submit-state failsafe.
+- [x] **ADDED:** Keep message text in input when send fails to support retry.
 
 ### Tests
 
@@ -382,6 +409,7 @@ The plan therefore changed from a single mutable board document to a revisioned 
   - receive assistant reply
   - observe board update reflected in the UI when returned
 - Manual usability pass for sidebar layout and board refresh behavior.
+- **ADDED:** Playwright assertions hardened to avoid strict-locator collisions on repeated text and persisted board content.
 
 ### Success criteria
 
@@ -389,6 +417,7 @@ The plan therefore changed from a single mutable board document to a revisioned 
 - Logging in starts a fresh backend chat context for that user.
 - AI replies are visible in the sidebar for the current page session.
 - Valid AI board changes are reflected in the board automatically.
+- **ADDED:** Failed AI requests recover gracefully without leaving chat controls stuck disabled.
 
 ## Sequence gates
 
