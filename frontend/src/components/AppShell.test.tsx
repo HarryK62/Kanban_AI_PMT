@@ -4,9 +4,9 @@ import { AppShell } from "@/components/AppShell";
 import { initialData, type BoardData } from "@/lib/kanban";
 
 describe("AppShell", () => {
-  let currentBoard: BoardData;
+  let boardsByUser: Record<string, BoardData>;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (typeof input === "string" && input.endsWith("/api/chat/harry/session")) {
+    if (typeof input === "string" && input.includes("/api/chat/") && input.endsWith("/session")) {
       return new Response(
         JSON.stringify({
           chat_id: 1,
@@ -15,14 +15,23 @@ describe("AppShell", () => {
       );
     }
 
-    if (typeof input === "string" && input.endsWith("/api/board/harry")) {
+    if (typeof input === "string" && input.includes("/api/board/")) {
+      const username = input.split("/").at(-1);
+      if (!username) {
+        throw new Error(`Invalid board request: ${input}`);
+      }
+
+      if (!boardsByUser[username]) {
+        boardsByUser[username] = structuredClone(initialData);
+      }
+
       if (init?.method === "PUT" && init.body) {
-        currentBoard = JSON.parse(String(init.body)) as BoardData;
+        boardsByUser[username] = JSON.parse(String(init.body)) as BoardData;
         return new Response(
           JSON.stringify({
-            username: "harry",
+            username,
             current_board_state_id: 2,
-            board: currentBoard,
+            board: boardsByUser[username],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
@@ -30,9 +39,9 @@ describe("AppShell", () => {
 
       return new Response(
         JSON.stringify({
-          username: "harry",
+          username,
           current_board_state_id: 1,
-          board: currentBoard,
+          board: boardsByUser[username],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
@@ -44,7 +53,9 @@ describe("AppShell", () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    currentBoard = structuredClone(initialData);
+    boardsByUser = {
+      harry: structuredClone(initialData),
+    };
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockClear();
   });
@@ -79,8 +90,39 @@ describe("AppShell", () => {
     await userEvent.type(screen.getByLabelText(/password/i), "credentials");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
+    expect(screen.getByRole("alert")).toHaveTextContent("Invalid username or password.");
+    expect(screen.queryByRole("heading", { name: "Kanban Studio" })).not.toBeInTheDocument();
+  });
+
+  it("creates a new account and signs in with it", async () => {
+    render(<AppShell />);
+
+    await userEvent.click(screen.getByRole("button", { name: /new here\? sign up/i }));
+    await userEvent.type(screen.getByLabelText(/username/i), "newuser");
+    await userEvent.type(screen.getByLabelText(/^password$/i), "StrongPass1!");
+    await userEvent.type(screen.getByLabelText(/confirm password/i), "StrongPass1!");
+    await userEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Account created. You can sign in now.");
+
+    await userEvent.type(screen.getByLabelText(/password/i), "StrongPass1!");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/newuser/session", { method: "POST" });
+  });
+
+  it("blocks signup when password is weak", async () => {
+    render(<AppShell />);
+
+    await userEvent.click(screen.getByRole("button", { name: /new here\? sign up/i }));
+    await userEvent.type(screen.getByLabelText(/username/i), "weakuser");
+    await userEvent.type(screen.getByLabelText(/^password$/i), "weak");
+    await userEvent.type(screen.getByLabelText(/confirm password/i), "weak");
+    await userEvent.click(screen.getByRole("button", { name: /create account/i }));
+
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Use username 'harry' and password 'kijanka'."
+      "Use a stronger password that passes all checks below."
     );
     expect(screen.queryByRole("heading", { name: "Kanban Studio" })).not.toBeInTheDocument();
   });
@@ -99,6 +141,7 @@ describe("AppShell", () => {
 
   it("restores the current tab session after reload", async () => {
     window.sessionStorage.setItem("pm:isAuthenticated", "true");
+    window.sessionStorage.setItem("pm:authenticatedUsername", "harry");
 
     render(<AppShell />);
 

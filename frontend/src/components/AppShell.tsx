@@ -3,42 +3,202 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
 
-const VALID_USERNAME = "harry";
-const VALID_PASSWORD = "kijanka";
 const AUTHENTICATED_SESSION_KEY = "pm:isAuthenticated";
-const CHAT_MESSAGES_SESSION_KEY = `pm:chatMessages:${VALID_USERNAME}`;
+const AUTHENTICATED_USERNAME_SESSION_KEY = "pm:authenticatedUsername";
+const ACCOUNTS_STORAGE_KEY = "pm:accounts";
+
+type Account = {
+  username: string;
+  password: string;
+};
+
+const DEFAULT_ACCOUNT: Account = {
+  username: "harry",
+  password: "kijanka",
+};
+
+const normalizeUsername = (value: string) => value.trim().toLowerCase();
+
+const getStoredAccounts = (): Account[] => {
+  if (typeof window === "undefined") {
+    return [DEFAULT_ACCOUNT];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+    if (!rawValue) {
+      return [DEFAULT_ACCOUNT];
+    }
+
+    const parsedValue = JSON.parse(rawValue) as unknown;
+    if (!Array.isArray(parsedValue)) {
+      return [DEFAULT_ACCOUNT];
+    }
+
+    const parsedAccounts = parsedValue
+      .filter(
+        (item): item is Account =>
+          Boolean(item) &&
+          typeof item === "object" &&
+          typeof (item as Account).username === "string" &&
+          typeof (item as Account).password === "string"
+      )
+      .map((account) => ({
+        username: normalizeUsername(account.username),
+        password: account.password,
+      }));
+
+    const accountsByUsername = new Map<string, Account>();
+    accountsByUsername.set(DEFAULT_ACCOUNT.username, DEFAULT_ACCOUNT);
+    for (const account of parsedAccounts) {
+      if (!account.username) {
+        continue;
+      }
+      accountsByUsername.set(account.username, account);
+    }
+
+    return [...accountsByUsername.values()];
+  } catch {
+    return [DEFAULT_ACCOUNT];
+  }
+};
+
+const saveAccounts = (accounts: Account[]) => {
+  const accountsByUsername = new Map<string, Account>();
+  accountsByUsername.set(DEFAULT_ACCOUNT.username, DEFAULT_ACCOUNT);
+  for (const account of accounts) {
+    accountsByUsername.set(normalizeUsername(account.username), {
+      username: normalizeUsername(account.username),
+      password: account.password,
+    });
+  }
+
+  window.localStorage.setItem(
+    ACCOUNTS_STORAGE_KEY,
+    JSON.stringify([...accountsByUsername.values()])
+  );
+};
+
+const getPasswordChecks = (password: string) => {
+  const checks = {
+    minLength: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    symbol: /[^A-Za-z0-9]/.test(password),
+  };
+
+  const score = Object.values(checks).filter(Boolean).length;
+  const isStrong = score === 5;
+  return { checks, score, isStrong };
+};
+
+const getPasswordStrengthLabel = (score: number) => {
+  if (score <= 2) {
+    return "Weak";
+  }
+  if (score <= 4) {
+    return "Medium";
+  }
+  return "Strong";
+};
 
 export const AppShell = () => {
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticatedUsername, setAuthenticatedUsername] = useState("");
   const [sessionKey, setSessionKey] = useState(0);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
 
+  const passwordStrength = getPasswordChecks(password);
+
   useEffect(() => {
     const hasAuthenticatedSession =
       window.sessionStorage.getItem(AUTHENTICATED_SESSION_KEY) === "true";
-    if (hasAuthenticatedSession) {
+    const storedUsername = window.sessionStorage.getItem(
+      AUTHENTICATED_USERNAME_SESSION_KEY
+    );
+    if (hasAuthenticatedSession && storedUsername) {
       setIsAuthenticated(true);
+      setAuthenticatedUsername(storedUsername);
     }
     setIsRestoringSession(false);
   }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const normalizedUsername = normalizeUsername(username);
 
-    if (username !== VALID_USERNAME || password !== VALID_PASSWORD) {
-      setErrorMessage("Use username 'harry' and password 'kijanka'.");
+    if (!normalizedUsername) {
+      setErrorMessage("Enter a username.");
+      return;
+    }
+
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (authMode === "signup") {
+      if (!/^[a-z0-9._-]{3,32}$/i.test(normalizedUsername)) {
+        setErrorMessage(
+          "Username must be 3-32 characters and can include letters, numbers, dots, hyphens, or underscores."
+        );
+        return;
+      }
+
+      if (!passwordStrength.isStrong) {
+        setErrorMessage(
+          "Use a stronger password that passes all checks below."
+        );
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setErrorMessage("Password confirmation does not match.");
+        return;
+      }
+
+      const existingAccounts = getStoredAccounts();
+      const userAlreadyExists = existingAccounts.some(
+        (account) => account.username === normalizedUsername
+      );
+
+      if (userAlreadyExists) {
+        setErrorMessage("That username already exists. Please sign in.");
+        return;
+      }
+
+      saveAccounts([
+        ...existingAccounts,
+        { username: normalizedUsername, password },
+      ]);
+      setAuthMode("signin");
+      setPassword("");
+      setConfirmPassword("");
+      setSuccessMessage("Account created. You can sign in now.");
+      return;
+    }
+
+    const accounts = getStoredAccounts();
+    const matchingAccount = accounts.find(
+      (account) =>
+        account.username === normalizedUsername && account.password === password
+    );
+
+    if (!matchingAccount) {
+      setErrorMessage("Invalid username or password.");
       return;
     }
 
     setIsStartingSession(true);
-    setErrorMessage("");
 
     try {
-      const response = await fetch(`/api/chat/${VALID_USERNAME}/session`, {
+      const response = await fetch(`/api/chat/${normalizedUsername}/session`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -46,10 +206,15 @@ export const AppShell = () => {
       }
 
       setIsAuthenticated(true);
+      setAuthenticatedUsername(normalizedUsername);
       window.sessionStorage.setItem(AUTHENTICATED_SESSION_KEY, "true");
-      window.sessionStorage.removeItem(CHAT_MESSAGES_SESSION_KEY);
+      window.sessionStorage.setItem(
+        AUTHENTICATED_USERNAME_SESSION_KEY,
+        normalizedUsername
+      );
       setSessionKey((currentKey) => currentKey + 1);
       setPassword("");
+      setConfirmPassword("");
     } catch {
       setErrorMessage("Unable to start your session right now.");
     } finally {
@@ -59,11 +224,15 @@ export const AppShell = () => {
 
   const handleLogout = () => {
     window.sessionStorage.removeItem(AUTHENTICATED_SESSION_KEY);
-    window.sessionStorage.removeItem(CHAT_MESSAGES_SESSION_KEY);
+    window.sessionStorage.removeItem(AUTHENTICATED_USERNAME_SESSION_KEY);
     setIsAuthenticated(false);
+    setAuthenticatedUsername("");
     setUsername("");
     setPassword("");
+    setConfirmPassword("");
     setErrorMessage("");
+    setSuccessMessage("");
+    setAuthMode("signin");
   };
 
   if (isRestoringSession) {
@@ -76,7 +245,7 @@ export const AppShell = () => {
         <KanbanBoard
           key={sessionKey}
           onLogout={handleLogout}
-          username={VALID_USERNAME}
+          username={authenticatedUsername}
         />
       ) : (
         <div className="relative overflow-hidden">
@@ -95,7 +264,9 @@ export const AppShell = () => {
                 Sign in to open your board.
               </h1>
               <p className="mt-3 text-sm leading-7 text-[var(--gray-text)]">
-                Use your credentials to continue.
+                {authMode === "signin"
+                  ? "Use your credentials to continue."
+                  : "Create an account to start managing your board."}
               </p>
               <div className="mt-7 space-y-4">
                 <label className="block">
@@ -104,7 +275,11 @@ export const AppShell = () => {
                   </span>
                   <input
                     value={username}
-                    onChange={(event) => setUsername(event.target.value)}
+                    onChange={(event) => {
+                      setUsername(event.target.value);
+                      setErrorMessage("");
+                      setSuccessMessage("");
+                    }}
                     className="mt-2 w-full rounded-2xl border border-[var(--stroke)] bg-white px-4 py-3 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
                     autoComplete="username"
                     aria-label="Username"
@@ -117,13 +292,61 @@ export const AppShell = () => {
                   <input
                     type="password"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      setErrorMessage("");
+                    }}
                     className="mt-2 w-full rounded-2xl border border-[var(--stroke)] bg-white px-4 py-3 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
-                    autoComplete="current-password"
+                    autoComplete={
+                      authMode === "signin"
+                        ? "current-password"
+                        : "new-password"
+                    }
                     aria-label="Password"
                   />
                 </label>
+                {authMode === "signup" ? (
+                  <>
+                    <label className="block">
+                      <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+                        Confirm Password
+                      </span>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(event) => {
+                          setConfirmPassword(event.target.value);
+                          setErrorMessage("");
+                        }}
+                        className="mt-2 w-full rounded-2xl border border-[var(--stroke)] bg-white px-4 py-3 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+                        autoComplete="new-password"
+                        aria-label="Confirm Password"
+                      />
+                    </label>
+
+                    <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-3 text-sm">
+                      <p className="font-semibold text-[var(--navy-dark)]">
+                        Password strength: {getPasswordStrengthLabel(passwordStrength.score)}
+                      </p>
+                      <ul className="mt-2 space-y-1 text-[var(--gray-text)]">
+                        <li>{passwordStrength.checks.minLength ? "[x]" : "[ ]"} At least 8 characters</li>
+                        <li>{passwordStrength.checks.uppercase ? "[x]" : "[ ]"} One uppercase letter</li>
+                        <li>{passwordStrength.checks.lowercase ? "[x]" : "[ ]"} One lowercase letter</li>
+                        <li>{passwordStrength.checks.number ? "[x]" : "[ ]"} One number</li>
+                        <li>{passwordStrength.checks.symbol ? "[x]" : "[ ]"} One symbol</li>
+                      </ul>
+                    </div>
+                  </>
+                ) : null}
               </div>
+              {successMessage ? (
+                <p
+                  className="mt-4 rounded-2xl border border-[var(--primary-blue)] bg-[rgba(32,157,215,0.08)] px-4 py-3 text-sm text-[var(--navy-dark)]"
+                  role="status"
+                >
+                  {successMessage}
+                </p>
+              ) : null}
               {errorMessage ? (
                 <p
                   className="mt-4 rounded-2xl border border-[var(--accent-yellow)] bg-[rgba(236,173,10,0.08)] px-4 py-3 text-sm text-[var(--navy-dark)]"
@@ -137,7 +360,28 @@ export const AppShell = () => {
                 disabled={isStartingSession}
                 className="mt-6 w-full rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isStartingSession ? "Opening board..." : "Sign in"}
+                {isStartingSession
+                  ? "Opening board..."
+                  : authMode === "signin"
+                    ? "Sign in"
+                    : "Create account"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode((currentMode) =>
+                    currentMode === "signin" ? "signup" : "signin"
+                  );
+                  setPassword("");
+                  setConfirmPassword("");
+                  setErrorMessage("");
+                  setSuccessMessage("");
+                }}
+                className="mt-3 w-full rounded-full border border-[var(--stroke)] px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              >
+                {authMode === "signin"
+                  ? "New here? Sign up"
+                  : "Have an account? Sign in"}
               </button>
             </form>
           </main>

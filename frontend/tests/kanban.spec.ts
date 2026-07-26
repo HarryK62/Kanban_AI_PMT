@@ -7,6 +7,22 @@ const login = async (page: Page) => {
   await page.getByRole("button", { name: /sign in/i }).click();
 };
 
+const signupAndLogin = async (
+  page: Page,
+  username: string,
+  password: string
+) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /new here\? sign up/i }).click();
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel(/^Password$/).fill(password);
+  await page.getByLabel("Confirm Password").fill(password);
+  await page.getByRole("button", { name: /create account/i }).click();
+  await expect(page.getByRole("status")).toContainText("Account created");
+  await page.getByLabel(/^Password$/).fill(password);
+  await page.getByRole("button", { name: /sign in/i }).click();
+};
+
 test("requires login before showing the board", async ({ page }) => {
   await page.goto("/");
   await expect(
@@ -17,6 +33,15 @@ test("requires login before showing the board", async ({ page }) => {
 
 test("loads the kanban board", async ({ page }) => {
   await login(page);
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
+});
+
+test("allows signup and sign in for a new user", async ({ page }) => {
+  const username = `newuser${Date.now()}`;
+  const password = "StrongPass1!";
+  await signupAndLogin(page, username, password);
+
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 });
