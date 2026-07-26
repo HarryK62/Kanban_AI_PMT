@@ -8,6 +8,14 @@ The following implementation and stabilization work was completed after the init
 
 - **ADDED:** Hardcoded login credentials changed from `user` / `password` to `harry` / `kijanka`.
 - **ADDED:** Sign-in screen simplified to a single centered form (removed left-side credential panel).
+- **ADDED:** Frontend auth expanded from single hardcoded credentials to local multi-account sign in and sign up.
+- **ADDED:** Signup validation and security checks:
+  - username format validation
+  - password confirmation
+  - password strength checks (length, upper/lowercase, number, symbol)
+- **ADDED:** Auth test coverage expanded:
+  - unit tests for signup success and weak-password rejection
+  - Playwright integration test for new-user signup then sign in
 - **ADDED:** AI chat UX hardening:
   - request timeout and submit-state failsafe to prevent stuck "submitting" UI
   - preserve typed message on failed send
@@ -219,6 +227,9 @@ The plan therefore changed from a single mutable board document to a revisioned 
 - [x] Add a login screen shown before the board is accessible.
 - [x] Implement hardcoded credential check for `user` / `password`.
 - [x] **ADDED:** Update hardcoded credential check to `harry` / `kijanka`.
+- [x] **ADDED:** Replace single-user hardcoded auth with local multi-account auth.
+- [x] **ADDED:** Add sign-up mode with explicit "New here? Sign up" toggle.
+- [x] **ADDED:** Add password-strength checks and confirm-password validation for signup.
 - [x] Store login state on the frontend only for this phase.
 - [x] Add a logout control.
 - [x] Prevent direct access to the board UI until logged in.
@@ -229,9 +240,12 @@ The plan therefore changed from a single mutable board document to a revisioned 
 - Frontend unit/integration tests:
   - valid credentials allow access
   - invalid credentials show an error
+  - signup creates a new account and allows login
+  - weak signup password is rejected
   - logout returns the user to the login screen
 - Playwright flow:
   - visit `/`
+  - sign up a new user
   - log in
   - see the board
   - log out
@@ -240,7 +254,8 @@ The plan therefore changed from a single mutable board document to a revisioned 
 ### Success criteria
 
 - The user must log in before seeing the board.
-- The only accepted credentials are `harry` / `kijanka`.
+- The app supports multiple local accounts created through signup.
+- Signup enforces password-strength and confirmation checks.
 - Login and logout are covered by automated tests.
 
 ## Part 5: Database Modeling
