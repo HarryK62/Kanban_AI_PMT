@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const login = async (page: Page) => {
   await page.goto("/");
-  await page.getByLabel("Username").fill("user");
-  await page.getByLabel("Password").fill("password");
+  await page.getByLabel("Username").fill("harry");
+  await page.getByLabel("Password").fill("kijanka");
   await page.getByRole("button", { name: /sign in/i }).click();
 };
 
@@ -22,7 +22,7 @@ test("loads the kanban board", async ({ page }) => {
 });
 
 test("sends a chat request and reflects the returned board update", async ({ page }) => {
-  await page.route("**/api/chat/user/messages", async (route) => {
+  await page.route("**/api/chat/harry/messages", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -159,8 +159,8 @@ test("logs out back to the login screen", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).not.toBeVisible();
 
-  await page.getByLabel("Username").fill("user");
-  await page.getByLabel("Password").fill("password");
+  await page.getByLabel("Username").fill("harry");
+  await page.getByLabel("Password").fill("kijanka");
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect(page.getByRole("heading", { name: "Session card" }).first()).toBeVisible();
 });
@@ -179,8 +179,8 @@ test("loads the persisted board in a new window", async ({ browser, page }) => {
   await expect(
     secondPage.getByRole("heading", { name: /sign in to open your board/i })
   ).toBeVisible();
-  await secondPage.getByLabel("Username").fill("user");
-  await secondPage.getByLabel("Password").fill("password");
+  await secondPage.getByLabel("Username").fill("harry");
+  await secondPage.getByLabel("Password").fill("kijanka");
   await secondPage.getByRole("button", { name: /sign in/i }).click();
   await expect(secondPage.getByRole("heading", { name: "Tab-only card" }).first()).toBeVisible();
   await secondPage.close();

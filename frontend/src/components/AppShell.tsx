@@ -3,8 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
 
-const VALID_USERNAME = "user";
-const VALID_PASSWORD = "password";
+const VALID_USERNAME = "harry";
+const VALID_PASSWORD = "kijanka";
 const AUTHENTICATED_SESSION_KEY = "pm:isAuthenticated";
 const CHAT_MESSAGES_SESSION_KEY = `pm:chatMessages:${VALID_USERNAME}`;
 
@@ -30,7 +30,7 @@ export const AppShell = () => {
     event.preventDefault();
 
     if (username !== VALID_USERNAME || password !== VALID_PASSWORD) {
-      setErrorMessage("Use username 'user' and password 'password'.");
+      setErrorMessage("Use username 'harry' and password 'kijanka'.");
       return;
     }
 
@@ -102,7 +102,7 @@ export const AppShell = () => {
                       Username
                     </p>
                     <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                      user
+                      {VALID_USERNAME}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
@@ -110,7 +110,7 @@ export const AppShell = () => {
                       Password
                     </p>
                     <p className="mt-2 text-lg font-semibold text-[var(--secondary-purple)]">
-                      password
+                      {VALID_PASSWORD}
                     </p>
                   </div>
                 </div>

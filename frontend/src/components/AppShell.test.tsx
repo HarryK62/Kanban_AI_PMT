@@ -6,7 +6,7 @@ import { initialData, type BoardData } from "@/lib/kanban";
 describe("AppShell", () => {
   let currentBoard: BoardData;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (typeof input === "string" && input.endsWith("/api/chat/user/session")) {
+    if (typeof input === "string" && input.endsWith("/api/chat/harry/session")) {
       return new Response(
         JSON.stringify({
           chat_id: 1,
@@ -15,12 +15,12 @@ describe("AppShell", () => {
       );
     }
 
-    if (typeof input === "string" && input.endsWith("/api/board/user")) {
+    if (typeof input === "string" && input.endsWith("/api/board/harry")) {
       if (init?.method === "PUT" && init.body) {
         currentBoard = JSON.parse(String(init.body)) as BoardData;
         return new Response(
           JSON.stringify({
-            username: "user",
+            username: "harry",
             current_board_state_id: 2,
             board: currentBoard,
           }),
@@ -30,7 +30,7 @@ describe("AppShell", () => {
 
       return new Response(
         JSON.stringify({
-          username: "user",
+          username: "harry",
           current_board_state_id: 1,
           board: currentBoard,
         }),
@@ -64,12 +64,12 @@ describe("AppShell", () => {
   it("authenticates with the valid credentials", async () => {
     render(<AppShell />);
 
-    await userEvent.type(screen.getByLabelText(/username/i), "user");
-    await userEvent.type(screen.getByLabelText(/password/i), "password");
+    await userEvent.type(screen.getByLabelText(/username/i), "harry");
+    await userEvent.type(screen.getByLabelText(/password/i), "kijanka");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/chat/user/session", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/harry/session", { method: "POST" });
   });
 
   it("shows an error for invalid credentials", async () => {
@@ -80,7 +80,7 @@ describe("AppShell", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Use username 'user' and password 'password'."
+      "Use username 'harry' and password 'kijanka'."
     );
     expect(screen.queryByRole("heading", { name: "Kanban Studio" })).not.toBeInTheDocument();
   });
@@ -88,8 +88,8 @@ describe("AppShell", () => {
   it("logs out back to the login screen", async () => {
     render(<AppShell />);
 
-    await userEvent.type(screen.getByLabelText(/username/i), "user");
-    await userEvent.type(screen.getByLabelText(/password/i), "password");
+    await userEvent.type(screen.getByLabelText(/username/i), "harry");
+    await userEvent.type(screen.getByLabelText(/password/i), "kijanka");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     await screen.findByText("Backlog");
     await userEvent.click(screen.getByRole("button", { name: /log out/i }));
@@ -103,14 +103,14 @@ describe("AppShell", () => {
     render(<AppShell />);
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/chat/user/session", { method: "POST" });
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/chat/harry/session", { method: "POST" });
   });
 
   it("keeps the same board after logout and login in the same tab", async () => {
     render(<AppShell />);
 
-    await userEvent.type(screen.getByLabelText(/username/i), "user");
-    await userEvent.type(screen.getByLabelText(/password/i), "password");
+    await userEvent.type(screen.getByLabelText(/username/i), "harry");
+    await userEvent.type(screen.getByLabelText(/password/i), "kijanka");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     await screen.findByText("Backlog");
 
@@ -131,8 +131,8 @@ describe("AppShell", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: /log out/i }));
 
-    await userEvent.type(screen.getByLabelText(/username/i), "user");
-    await userEvent.type(screen.getByLabelText(/password/i), "password");
+    await userEvent.type(screen.getByLabelText(/username/i), "harry");
+    await userEvent.type(screen.getByLabelText(/password/i), "kijanka");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(screen.getByText("Session card")).toBeInTheDocument());
