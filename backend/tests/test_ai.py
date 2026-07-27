@@ -2,12 +2,13 @@ import json
 
 import httpx
 import pytest
-from fastapi import HTTPException
 
 from app.ai import (
     CONNECTIVITY_PROMPT,
     OPENROUTER_API_URL,
     OpenRouterClient,
+    OpenRouterConfigurationError,
+    OpenRouterRequestError,
     build_chat_messages,
 )
 
@@ -40,11 +41,10 @@ async def test_complete_sends_openrouter_request() -> None:
 async def test_complete_requires_api_key() -> None:
     client = OpenRouterClient(api_key="")
 
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(OpenRouterConfigurationError) as excinfo:
         await client.connectivity_test()
 
-    assert excinfo.value.status_code == 500
-    assert excinfo.value.detail == "OPENROUTER_API_KEY is not configured."
+    assert str(excinfo.value) == "OPENROUTER_API_KEY is not configured."
 
 
 @pytest.mark.anyio
@@ -56,11 +56,10 @@ async def test_complete_rejects_bad_upstream_response() -> None:
     async with httpx.AsyncClient(transport=transport) as http_client:
         client = OpenRouterClient(api_key="test-key", http_client=http_client)
 
-        with pytest.raises(HTTPException) as excinfo:
+        with pytest.raises(OpenRouterRequestError) as excinfo:
             await client.connectivity_test()
 
-    assert excinfo.value.status_code == 502
-    assert excinfo.value.detail == "OpenRouter response was malformed."
+    assert str(excinfo.value) == "OpenRouter response was malformed."
 
 
 def test_build_chat_messages_adds_system_and_board_context() -> None:

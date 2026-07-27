@@ -1,10 +1,10 @@
+import json
 import os
 from pathlib import Path
 from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import HTTPException
 
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -14,6 +14,14 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 
 # Load environment variables from project root for local runs.
 load_dotenv(ROOT_DIR / ".env")
+
+
+class OpenRouterConfigurationError(ValueError):
+    """Raised when required OpenRouter configuration (e.g. the API key) is missing."""
+
+
+class OpenRouterRequestError(RuntimeError):
+    """Raised when an OpenRouter request fails or returns an unusable response."""
 
 
 class OpenRouterClient:
@@ -35,10 +43,7 @@ class OpenRouterClient:
 
     async def complete_messages(self, messages: list[dict[str, str]]) -> str:
         if not self.api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="OPENROUTER_API_KEY is not configured.",
-            )
+            raise OpenRouterConfigurationError("OPENROUTER_API_KEY is not configured.")
 
         payload = {
             "model": self.model,
@@ -65,19 +70,13 @@ class OpenRouterClient:
                 )
 
         if response.status_code >= 400:
-            raise HTTPException(
-                status_code=502,
-                detail="OpenRouter request failed.",
-            )
+            raise OpenRouterRequestError("OpenRouter request failed.")
 
         data = response.json()
         try:
             return data["choices"][0]["message"]["content"].strip()
         except (KeyError, IndexError, TypeError):
-            raise HTTPException(
-                status_code=502,
-                detail="OpenRouter response was malformed.",
-            ) from None
+            raise OpenRouterRequestError("OpenRouter response was malformed.") from None
 
 
 def build_chat_messages(
@@ -110,6 +109,4 @@ def build_chat_messages(
 
 
 def json_dumps(value: Any) -> str:
-    import json
-
     return json.dumps(value, separators=(",", ":"))

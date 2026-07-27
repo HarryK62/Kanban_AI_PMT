@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -141,19 +142,6 @@ class BoardRepository:
                 );
                 """
             )
-            connection.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_user_id
-                ON boards(user_id)
-                """
-            )
-            connection.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_current_board_state_id
-                ON boards(current_board_state_id)
-                WHERE current_board_state_id IS NOT NULL
-                """
-            )
 
     def get_or_create_board(self, username: str) -> tuple[int, Board]:
         with self.connect() as connection:
@@ -291,38 +279,7 @@ class BoardRepository:
         return json_dumps(board.model_dump(by_alias=True))
 
     def _deserialize_board(self, board_json: str) -> Board:
-        import json
-
         return Board.model_validate(json.loads(board_json))
-
-    def get_or_create_chat(self, username: str) -> int:
-        with self.connect() as connection:
-            user_id = self._get_or_create_user(connection, username)
-            board_row = self._read_current_board_row(connection, user_id)
-            if board_row is None:
-                self._create_board(connection, user_id, default_board())
-
-            row = connection.execute(
-                """
-                SELECT id
-                FROM chats
-                WHERE user_id = ?
-                LIMIT 1
-                """,
-                (user_id,),
-            ).fetchone()
-            if row is not None:
-                return int(row["id"])
-
-            timestamp = current_timestamp()
-            cursor = connection.execute(
-                """
-                INSERT INTO chats (user_id, created_at, updated_at)
-                VALUES (?, ?, ?)
-                """,
-                (user_id, timestamp, timestamp),
-            )
-            return int(cursor.lastrowid)
 
     def reset_chat_session(self, username: str) -> int:
         with self.connect() as connection:

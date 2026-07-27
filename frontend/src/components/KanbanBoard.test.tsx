@@ -8,6 +8,11 @@ const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 describe("KanbanBoard", () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (typeof input === "string" && input.endsWith("/api/chat/user/messages")) {
+      const parsedBody = init?.body ? JSON.parse(String(init.body)) : {};
+      if (parsedBody.message === "trigger-chat-failure") {
+        return new Response(null, { status: 500 });
+      }
+
       return new Response(
         JSON.stringify({
           chat_id: 1,
@@ -130,6 +135,83 @@ describe("KanbanBoard", () => {
       expect(screen.getByText("I renamed Backlog to Ideas.")).toBeInTheDocument()
     );
     expect(screen.getByText("Ideas")).toBeInTheDocument();
+  });
+
+  it("shows a chat error message when the request fails", async () => {
+    render(<KanbanBoard username="user" />);
+    await screen.findByText("Backlog");
+
+    await userEvent.type(
+      screen.getByLabelText("Message"),
+      "trigger-chat-failure"
+    );
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Unable to reach the AI now.")
+      ).toBeInTheDocument()
+    );
+  });
+
+  it("keeps the optimistic update after a successful save", async () => {
+    const originalImpl = fetchMock.getMockImplementation()!;
+    let resolvePut!: (value: Response) => void;
+    const putPromise = new Promise<Response>((resolve) => {
+      resolvePut = resolve;
+    });
+    let capturedBody: string | undefined;
+
+    fetchMock.mockImplementation(async (input, init) => {
+      if (
+        typeof input === "string" &&
+        input.endsWith("/api/board/user") &&
+        init?.method === "PUT"
+      ) {
+        capturedBody = init.body ? String(init.body) : undefined;
+        return putPromise;
+      }
+
+      return originalImpl(input, init);
+    });
+
+    try {
+      render(<KanbanBoard username="user" />);
+      await screen.findByText("Backlog");
+
+      const column = getFirstColumn();
+      await userEvent.click(
+        within(column).getByRole("button", { name: /add a card/i })
+      );
+      await userEvent.type(
+        within(column).getByPlaceholderText(/card title/i),
+        "Optimistic card"
+      );
+      await userEvent.click(
+        within(column).getByRole("button", { name: /add card/i })
+      );
+
+      // The card appears immediately from the optimistic local update,
+      // before the in-flight PUT request has resolved.
+      expect(within(column).getByText("Optimistic card")).toBeInTheDocument();
+
+      resolvePut(
+        new Response(
+          JSON.stringify({
+            username: "user",
+            board: JSON.parse(capturedBody ?? "{}"),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+      // The optimistic update must still be visible once the save succeeds.
+      await waitFor(() =>
+        expect(within(column).getByText("Optimistic card")).toBeInTheDocument()
+      );
+    } finally {
+      fetchMock.mockImplementation(originalImpl);
+    }
   });
 
   it("submits the chat form when enter is pressed", async () => {

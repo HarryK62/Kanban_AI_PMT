@@ -7,12 +7,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
+import type { ChatMessage } from "@/lib/chat";
 
 type AiChatSidebarProps = {
   className?: string;

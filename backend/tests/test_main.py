@@ -139,6 +139,45 @@ def test_board_replace_updates_persisted_board(tmp_path: Path) -> None:
     assert board_row[0] == board_states[1][0]
 
 
+def test_board_replace_for_brand_new_user_bootstraps_then_applies_update(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "app.db"
+    client = TestClient(
+        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
+    )
+
+    # No prior GET for this username: the user, board, and default board state
+    # do not exist yet when the PUT arrives.
+    board_payload = default_board().model_dump(by_alias=True)
+    board_payload["columns"][0]["title"] = "Ideas"
+
+    response = client.put("/api/board/newcomer", json=board_payload)
+
+    assert response.status_code == 200
+    assert response.json()["board"]["columns"][0]["title"] == "Ideas"
+
+    with sqlite3.connect(db_path) as connection:
+        users = connection.execute(
+            "SELECT username FROM users"
+        ).fetchall()
+        boards = connection.execute(
+            "SELECT current_board_state_id FROM boards"
+        ).fetchall()
+        board_states = connection.execute(
+            "SELECT id, previous_board_state_id FROM board_states ORDER BY id ASC"
+        ).fetchall()
+
+    assert users == [("newcomer",)]
+    assert len(boards) == 1
+    # The bootstrap default board state is created first, then replaced by the
+    # incoming payload as a second, linked board state.
+    assert len(board_states) == 2
+    assert board_states[0][1] is None
+    assert board_states[1][1] == board_states[0][0]
+    assert boards[0][0] == board_states[1][0]
+
+
 def test_board_replace_rejects_invalid_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "app.db"
     client = TestClient(

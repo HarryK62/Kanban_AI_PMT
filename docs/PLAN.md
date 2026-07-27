@@ -2,6 +2,25 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Additional completed work (2026-07-27, part 2)
+
+Addressed the remaining medium- and low-priority findings from `docs/code_review.md` (2026-03-24), plus its noted test coverage gaps.
+
+- **FIXED:** `OpenRouterClient` no longer raises `fastapi.HTTPException`; it raises `OpenRouterConfigurationError` (missing API key) or `OpenRouterRequestError` (upstream/malformed response), translated to `HTTPException` at the route level in `main.py`. `test_ai.py` no longer imports FastAPI.
+- **FIXED:** The chat route's `except Exception` around AI reply parsing now catches only the specific exceptions that parsing can raise (`json.JSONDecodeError`, `KeyError`, `AttributeError`, `TypeError`, `ValueError`).
+- **FIXED:** `anyio` is now an explicit dev dependency (`backend/pyproject.toml`) instead of relying on it being a transitive dependency of `httpx`/`starlette`; added `backend/tests/conftest.py` with an explicit `anyio_backend` fixture pinned to `"asyncio"`.
+- **FIXED:** Removed the dead `get_or_create_chat` method from `BoardRepository` (all callers already used `_get_or_create_chat_id`).
+- **FIXED:** Moved the function-local `import json` in `repository.py` and `ai.py` to module level.
+- **FIXED:** Removed the redundant `CREATE UNIQUE INDEX` statements on `boards.user_id` and `boards.current_board_state_id` — both columns already have a column-level `UNIQUE` constraint.
+- **FIXED:** `docs/DATABASE.md` now matches the actual DDL: `current_board_state_id` is documented as nullable (needed for the two-step board bootstrap), with no FK on that column.
+- **FIXED:** Deduplicated the `ChatMessage` type (was defined identically in `KanbanBoard.tsx` and `AiChatSidebar.tsx`) into `frontend/src/lib/chat.ts`.
+- **FIXED:** `KanbanBoard` now filters out any card lookup that resolves to `undefined` before passing cards to `KanbanColumn`, so a stale `cardIds` entry can't crash the render path.
+- **ADDED:** Minimal "Saving..." indicator in the board header while a board save is in flight (previously only the initial load showed progress).
+- **ADDED:** `frontend/tests/helpers.ts` with a `defaultBoard(overrides?)` helper; the Playwright chat-update test no longer inlines a full ~65-line board JSON payload.
+- **ADDED:** Backend test coverage for previously untested paths: `replace_board` bootstrapping a board for a brand-new user in one PUT, and `append_chat_message` creating a chat row when none exists yet (new `backend/tests/test_repository.py`).
+- **ADDED:** Frontend test coverage: chat error state rendering on a failed AI request, and the optimistic board update surviving a successful save.
+- Full verification pass after the fixes: backend pytest (22 passed), frontend vitest (19 passed), Playwright integration suite (8 passed).
+
 ## Additional completed work (2026-07-27)
 
 Addressed the four high-priority findings from `docs/code_review.md` (2026-03-24):

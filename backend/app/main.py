@@ -6,7 +6,13 @@ from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.ai import OPENROUTER_MODEL, OpenRouterClient, build_chat_messages
+from app.ai import (
+    OPENROUTER_MODEL,
+    OpenRouterClient,
+    OpenRouterConfigurationError,
+    OpenRouterRequestError,
+    build_chat_messages,
+)
 from app.models import (
   AiBoardUpdate,
     Board,
@@ -184,19 +190,24 @@ def create_app(
 
         history = repository.list_chat_history(username)
         client = ai_client or OpenRouterClient()
-        raw_reply = await client.complete_messages(
-            build_chat_messages(
-                history=history + [{"role": "user", "content": user_content}],
-                board_json=board.model_dump(by_alias=True),
+        try:
+            raw_reply = await client.complete_messages(
+                build_chat_messages(
+                    history=history + [{"role": "user", "content": user_content}],
+                    board_json=board.model_dump(by_alias=True),
+                )
             )
-        )
+        except OpenRouterConfigurationError as error:
+            raise HTTPException(status_code=500, detail=str(error)) from None
+        except OpenRouterRequestError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
 
         try:
           parsed_reply = json.loads(raw_reply)
           reply_text = parsed_reply["reply"].strip()
           if not reply_text:
             raise ValueError("Reply must not be blank.")
-        except Exception:
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=502,
                 detail="AI response was malformed.",
@@ -245,7 +256,12 @@ def create_app(
     @app.post("/api/ai/test", response_model=AiTestResponse)
     async def ai_connectivity_test() -> AiTestResponse:
         client = OpenRouterClient()
-        reply = await client.connectivity_test()
+        try:
+            reply = await client.connectivity_test()
+        except OpenRouterConfigurationError as error:
+            raise HTTPException(status_code=500, detail=str(error)) from None
+        except OpenRouterRequestError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
         return AiTestResponse(model=OPENROUTER_MODEL, reply=reply)
 
     static_dir = frontend_out_dir or FRONTEND_OUT_DIR

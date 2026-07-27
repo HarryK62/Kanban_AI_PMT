@@ -41,7 +41,7 @@ Columns:
 
 - `id` integer primary key
 - `user_id` integer not null unique references `users(id)`
-- `current_board_state_id` integer not null unique references `board_states(id)`
+- `current_board_state_id` integer unique, nullable, references `board_states(id)`
 - `created_at` text not null
 - `updated_at` text not null
 
@@ -49,6 +49,7 @@ Notes:
 
 - `boards` is the stable board identity for a user.
 - `current_board_state_id` points to the latest visible board state.
+- `current_board_state_id` is nullable because board creation is two steps: insert the `boards` row first, then insert its first `board_states` row, then update the pointer. It is set to `NULL` only for the instant between those two steps.
 - One board per user remains the MVP rule.
 
 ### `board_states`
@@ -80,11 +81,10 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS boards (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL UNIQUE,
-  current_board_state_id INTEGER NOT NULL UNIQUE,
+  current_board_state_id INTEGER UNIQUE,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id),
-  FOREIGN KEY (current_board_state_id) REFERENCES board_states(id)
+  FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS board_states (

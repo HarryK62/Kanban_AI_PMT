@@ -165,6 +165,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anyio" },
     { name = "pytest" },
 ]
 
@@ -177,7 +178,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.4.2" }]
+dev = [
+    { name = "anyio", specifier = ">=4.0" },
+    { name = "pytest", specifier = ">=8.4.2" },
+]
 
 [[package]]
 name = "pydantic"

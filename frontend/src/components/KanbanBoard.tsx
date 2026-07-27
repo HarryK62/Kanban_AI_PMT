@@ -14,7 +14,8 @@ import {
 import { AiChatSidebar } from "@/components/AiChatSidebar";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { createId, initialData, moveCard, type BoardData, type Card } from "@/lib/kanban";
+import type { ChatMessage } from "@/lib/chat";
 
 type KanbanBoardProps = {
   onLogout?: () => void;
@@ -39,12 +40,6 @@ type ChatReply = {
   current_board_state_id: number;
 };
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
-
 const CHAT_REQUEST_TIMEOUT_MS = 20_000;
 const CHAT_UI_FAILSAFE_TIMEOUT_MS = 25_000;
 const RENAME_PERSIST_DEBOUNCE_MS = 400;
@@ -58,6 +53,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [chatErrorMessage, setChatErrorMessage] = useState("");
   const [isChatSubmitting, setIsChatSubmitting] = useState(false);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -121,6 +117,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
   const saveGenerationRef = useRef(0);
+  const pendingSaveCountRef = useRef(0);
   const renamePersistTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -134,22 +131,31 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const persistBoard = async (nextBoard: BoardData) => {
     setErrorMessage("");
     const generation = ++saveGenerationRef.current;
+    pendingSaveCountRef.current += 1;
+    setIsSaving(true);
 
-    const response = await fetch(`/api/board/${username}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(nextBoard),
-    });
+    try {
+      const response = await fetch(`/api/board/${username}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(nextBoard),
+      });
 
-    if (!response.ok) {
-      throw new Error("Unable to save board.");
-    }
+      if (!response.ok) {
+        throw new Error("Unable to save board.");
+      }
 
-    const data = (await response.json()) as BoardResponse;
-    if (generation === saveGenerationRef.current) {
-      setBoard(data.board);
+      const data = (await response.json()) as BoardResponse;
+      if (generation === saveGenerationRef.current) {
+        setBoard(data.board);
+      }
+    } finally {
+      pendingSaveCountRef.current -= 1;
+      if (pendingSaveCountRef.current === 0) {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -329,6 +335,14 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
                   Loading board...
                 </p>
               ) : null}
+              {!isLoading && isSaving ? (
+                <p
+                  role="status"
+                  className="mt-4 text-sm font-medium text-[var(--primary-blue)]"
+                >
+                  Saving...
+                </p>
+              ) : null}
               {errorMessage ? (
                 <p className="mt-4 text-sm font-medium text-[var(--secondary-purple)]">
                   {errorMessage}
@@ -380,7 +394,9 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
                     <div key={column.id} className="w-[208px] shrink-0">
                       <KanbanColumn
                         column={column}
-                        cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                        cards={column.cardIds
+                          .map((cardId) => board.cards[cardId])
+                          .filter((card): card is Card => card !== undefined)}
                         onRename={handleRenameColumn}
                         onAddCard={handleAddCard}
                         onDeleteCard={handleDeleteCard}
