@@ -1,0 +1,13 @@
+name: pm-app
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pm-app:latest
+    container_name: pm-app
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
