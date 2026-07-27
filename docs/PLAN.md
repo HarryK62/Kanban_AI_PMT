@@ -2,6 +2,17 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Additional completed work (2026-07-27)
+
+Addressed the four high-priority findings from `docs/code_review.md` (2026-03-24):
+
+- **FIXED:** `BoardRepository.initialize()` now runs once in `create_app` instead of on every repository method call.
+- **FIXED:** The user's chat message is now persisted only after the AI call succeeds, so a malformed/failed AI response no longer leaves an unanswered user turn in `chat_messages`. The in-flight user message is still included in the AI prompt context before being written to the database.
+- **FIXED:** Column rename input debounces the `PUT /api/board/{username}` call (400ms) instead of firing one request per keystroke; the input itself still updates immediately for responsiveness.
+- **FIXED:** `KanbanBoard` tracks a save generation counter so a stale in-flight board save can no longer overwrite a newer board state (covers both rapid manual edits and an AI chat board update landing while a prior save is still in flight).
+- Updated `backend/tests/test_main.py` and `frontend/src/components/KanbanBoard.test.tsx` assertions to match the corrected behavior.
+- Full verification pass after the fixes: backend pytest (20 passed), frontend vitest (17 passed), Playwright integration suite (8 passed).
+
 ## Additional completed work (2026-07-26)
 
 The following implementation and stabilization work was completed after the initial plan draft and is now part of delivered scope.

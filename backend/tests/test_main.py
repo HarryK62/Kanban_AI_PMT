@@ -381,7 +381,9 @@ def test_chat_message_route_rejects_malformed_ai_reply(tmp_path: Path) -> None:
         ).fetchall()
 
     assert board_states == [(1,)]
-    assert chat_messages == [(1, "user", "Do something.", 1)]
+    # The user message must not be persisted when the AI call fails, otherwise
+    # it would be replayed as unanswered context on the next turn.
+    assert chat_messages == []
 
 
 def test_chat_message_route_rejects_invalid_board_update(tmp_path: Path) -> None:

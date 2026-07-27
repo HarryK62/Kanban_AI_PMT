@@ -150,6 +150,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Project Management MVP")
     repository = BoardRepository(db_path or DEFAULT_DB_PATH)
+    repository.initialize()
 
     @app.get("/api/hello")
     async def read_hello() -> dict[str, str]:
@@ -179,18 +180,13 @@ def create_app(
         chat_message: ChatMessageCreate,
     ) -> ChatReply:
         current_board_state_id, board = repository.get_board_snapshot(username)
-        chat_id, _ = repository.append_chat_message(
-            username=username,
-            role="user",
-            content=chat_message.message.strip(),
-            board_state_id=current_board_state_id,
-        )
+        user_content = chat_message.message.strip()
 
         history = repository.list_chat_history(username)
         client = ai_client or OpenRouterClient()
         raw_reply = await client.complete_messages(
             build_chat_messages(
-                history=history,
+                history=history + [{"role": "user", "content": user_content}],
                 board_json=board.model_dump(by_alias=True),
             )
         )
@@ -205,6 +201,13 @@ def create_app(
                 status_code=502,
                 detail="AI response was malformed.",
             ) from None
+
+        chat_id, _ = repository.append_chat_message(
+            username=username,
+            role="user",
+            content=user_content,
+            board_state_id=current_board_state_id,
+        )
 
         next_board_state_id = current_board_state_id
         next_board = board

@@ -73,10 +73,22 @@ describe("KanbanBoard", () => {
     await screen.findByText("Backlog");
     const column = getFirstColumn();
     const input = within(column).getByLabelText("Column title");
+    const fetchCallsBeforeRename = fetchMock.mock.calls.length;
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
     await waitFor(() => expect(input).toHaveValue("New Name"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(10));
+
+    // Renaming debounces persistence, so keystrokes should not each fire a PUT.
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(fetchCallsBeforeRename)
+    );
+    const putCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PUT"
+    );
+    expect(putCalls).toHaveLength(1);
+    expect(JSON.parse(String(putCalls[0][1]?.body)).columns[0].title).toBe(
+      "New Name"
+    );
   });
 
   it("adds and removes a card", async () => {

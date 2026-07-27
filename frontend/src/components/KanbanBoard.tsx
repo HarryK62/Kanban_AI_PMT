@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -47,6 +47,7 @@ type ChatMessage = {
 
 const CHAT_REQUEST_TIMEOUT_MS = 20_000;
 const CHAT_UI_FAILSAFE_TIMEOUT_MS = 25_000;
+const RENAME_PERSIST_DEBOUNCE_MS = 400;
 
 export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
@@ -119,9 +120,20 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   );
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
+  const saveGenerationRef = useRef(0);
+  const renamePersistTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (renamePersistTimeoutRef.current !== null) {
+        window.clearTimeout(renamePersistTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const persistBoard = async (nextBoard: BoardData) => {
     setErrorMessage("");
+    const generation = ++saveGenerationRef.current;
 
     const response = await fetch(`/api/board/${username}`, {
       method: "PUT",
@@ -136,10 +148,17 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
     }
 
     const data = (await response.json()) as BoardResponse;
-    setBoard(data.board);
+    if (generation === saveGenerationRef.current) {
+      setBoard(data.board);
+    }
   };
 
   const updateBoard = (updater: (currentBoard: BoardData) => BoardData) => {
+    if (renamePersistTimeoutRef.current !== null) {
+      window.clearTimeout(renamePersistTimeoutRef.current);
+      renamePersistTimeoutRef.current = null;
+    }
+
     const nextBoard = updater(board);
     setBoard(nextBoard);
     void persistBoard(nextBoard).catch(() => {
@@ -166,12 +185,23 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    updateBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
+    const nextBoard = {
+      ...board,
+      columns: board.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
       ),
-    }));
+    };
+    setBoard(nextBoard);
+
+    if (renamePersistTimeoutRef.current !== null) {
+      window.clearTimeout(renamePersistTimeoutRef.current);
+    }
+    renamePersistTimeoutRef.current = window.setTimeout(() => {
+      renamePersistTimeoutRef.current = null;
+      void persistBoard(nextBoard).catch(() => {
+        setErrorMessage("Unable to save the latest board changes.");
+      });
+    }, RENAME_PERSIST_DEBOUNCE_MS);
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
@@ -248,6 +278,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
       }
 
       const data = (await response.json()) as ChatReply;
+      saveGenerationRef.current += 1;
       setBoard(data.board);
       setChatMessages((currentMessages) => [
         ...currentMessages,

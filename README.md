@@ -91,6 +91,8 @@ npm run build
 
 ## Docker app
 
+The start and stop scripts below use Docker Compose so the app appears as a project in Docker Desktop.
+
 Start the full app from the project root:
 
 ```bash

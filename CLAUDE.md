@@ -71,4 +71,8 @@ OpenRouter model `openai/gpt-oss-120b`. The AI is instructed to return JSON matc
 
 **Auth**
 
-Frontend-only gate: hardcoded credentials `user` / `password`. Session state lives in `sessionStorage`. The backend identifies users by the `username` path parameter (always `"user"` for the MVP).
+Frontend-only, no backend auth endpoints. `AppShell.tsx` stores accounts (username/password) in `localStorage` under `pm:accounts`, seeded with a default account (`harry`/`kijanka`). Sign-up validates username format, password strength (length/upper/lower/number/symbol), and confirmation match. The active session (`isAuthenticated`, username) lives in `sessionStorage`, so it resets on new window/refresh. The signed-in username is passed as the `username` path parameter to all backend routes — the backend trusts it as-is with no verification.
+
+**Environment**
+
+`backend/app/ai.py` loads `OPENROUTER_API_KEY` from a `.env` file at the project root via `python-dotenv` (not `backend/.env`).

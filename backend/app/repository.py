@@ -156,8 +156,6 @@ class BoardRepository:
             )
 
     def get_or_create_board(self, username: str) -> tuple[int, Board]:
-        self.initialize()
-
         with self.connect() as connection:
             user_id = self._get_or_create_user(connection, username)
             row = self._read_current_board_row(connection, user_id)
@@ -170,8 +168,6 @@ class BoardRepository:
             )
 
     def replace_board(self, username: str, board: Board) -> tuple[int, Board]:
-        self.initialize()
-
         with self.connect() as connection:
             user_id = self._get_or_create_user(connection, username)
             existing_board = self._read_current_board_row(connection, user_id)
@@ -300,8 +296,6 @@ class BoardRepository:
         return Board.model_validate(json.loads(board_json))
 
     def get_or_create_chat(self, username: str) -> int:
-        self.initialize()
-
         with self.connect() as connection:
             user_id = self._get_or_create_user(connection, username)
             board_row = self._read_current_board_row(connection, user_id)
@@ -331,8 +325,6 @@ class BoardRepository:
             return int(cursor.lastrowid)
 
     def reset_chat_session(self, username: str) -> int:
-        self.initialize()
-
         with self.connect() as connection:
             user_id = self._get_or_create_user(connection, username)
             board_row = self._read_current_board_row(connection, user_id)
@@ -376,8 +368,6 @@ class BoardRepository:
             return int(cursor.lastrowid)
 
     def list_chat_history(self, username: str) -> list[dict[str, str]]:
-        self.initialize()
-
         with self.connect() as connection:
             chat_id = self._get_or_create_chat_id(connection, username)
             rows = connection.execute(
@@ -398,8 +388,6 @@ class BoardRepository:
         content: str,
         board_state_id: int,
     ) -> tuple[int, ChatMessageRecord]:
-        self.initialize()
-
         with self.connect() as connection:
             chat_id = self._get_or_create_chat_id(connection, username)
             row = self._insert_chat_message(

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_NAME="pm-app"
 
-if docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}\$"; then
-  docker rm -f "$CONTAINER_NAME"
-else
-  echo "Container $CONTAINER_NAME is not running."
-fi
+cd "$ROOT_DIR"
+docker compose down
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
