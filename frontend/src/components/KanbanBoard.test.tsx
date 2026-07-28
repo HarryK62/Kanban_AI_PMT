@@ -68,13 +68,42 @@ describe("KanbanBoard", () => {
   });
 
   it("renders five columns", async () => {
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
     expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
   });
 
+  it("sends the bearer token on the board fetch", async () => {
+    render(<KanbanBoard username="user" token="test-token" />);
+    await screen.findByText("Backlog");
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer test-token",
+    });
+  });
+
+  it("logs out automatically when the board fetch is unauthorized", async () => {
+    const originalImpl = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (typeof input === "string" && input.endsWith("/api/board/user")) {
+        return new Response(null, { status: 401 });
+      }
+      return originalImpl(input, init);
+    });
+
+    try {
+      const onLogout = vi.fn();
+      render(<KanbanBoard username="user" token="stale-token" onLogout={onLogout} />);
+
+      await waitFor(() => expect(onLogout).toHaveBeenCalledTimes(1));
+    } finally {
+      fetchMock.mockImplementation(originalImpl);
+    }
+  });
+
   it("renames a column", async () => {
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
     const column = getFirstColumn();
     const input = within(column).getByLabelText("Column title");
@@ -97,7 +126,7 @@ describe("KanbanBoard", () => {
   });
 
   it("adds and removes a card", async () => {
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
     const column = getFirstColumn();
     const addButton = within(column).getByRole("button", {
@@ -125,7 +154,7 @@ describe("KanbanBoard", () => {
   });
 
   it("sends a chat message and applies the returned board update", async () => {
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
 
     await userEvent.type(screen.getByLabelText("Message"), "Rename Backlog to Ideas.");
@@ -138,7 +167,7 @@ describe("KanbanBoard", () => {
   });
 
   it("shows a chat error message when the request fails", async () => {
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
 
     await userEvent.type(
@@ -176,7 +205,7 @@ describe("KanbanBoard", () => {
     });
 
     try {
-      render(<KanbanBoard username="user" />);
+      render(<KanbanBoard username="user" token="test-token" />);
       await screen.findByText("Backlog");
 
       const column = getFirstColumn();
@@ -215,7 +244,7 @@ describe("KanbanBoard", () => {
   });
 
   it("submits the chat form when enter is pressed", async () => {
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
 
     await userEvent.type(screen.getByLabelText("Message"), "Rename Backlog to Ideas.{enter}");
@@ -242,7 +271,7 @@ describe("KanbanBoard", () => {
       ])
     );
 
-    render(<KanbanBoard username="user" />);
+    render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
 
     expect(screen.queryByText("Rename Backlog to Ideas.")).not.toBeInTheDocument();

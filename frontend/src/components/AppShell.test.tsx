@@ -212,11 +212,15 @@ describe("AppShell", () => {
   it("restores the current tab session after reload", async () => {
     window.sessionStorage.setItem("pm:isAuthenticated", "true");
     window.sessionStorage.setItem("pm:authenticatedUsername", "harry");
+    window.sessionStorage.setItem("pm:authToken", "token-harry");
 
     render(<AppShell />);
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith("/api/chat/harry/session", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/board/harry", {
+      headers: { Authorization: "Bearer token-harry" },
+    });
   });
 
   it("keeps the same board after logout and login in the same tab", async () => {

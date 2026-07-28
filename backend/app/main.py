@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -204,8 +204,22 @@ def create_app(
         if token is not None:
             repository.delete_session(token)
 
+    async def require_session(
+        username: str, authorization: str | None = Header(default=None)
+    ) -> str:
+        token = _extract_bearer_token(authorization)
+        if token is None:
+            raise HTTPException(status_code=401, detail="Missing bearer token.")
+
+        token_username = repository.get_username_for_token(token)
+        if token_username is None or token_username != username:
+            raise HTTPException(status_code=401, detail="Invalid or expired session.")
+        return username
+
     @app.get("/api/board/{username}", response_model=BoardRecord)
-    async def read_board(username: str) -> BoardRecord:
+    async def read_board(
+        username: str, _authenticated_username: str = Depends(require_session)
+    ) -> BoardRecord:
         current_board_state_id, board = repository.get_or_create_board(username)
         return BoardRecord(
             username=username,
@@ -214,7 +228,11 @@ def create_app(
         )
 
     @app.put("/api/board/{username}", response_model=BoardRecord)
-    async def update_board(username: str, board: Board) -> BoardRecord:
+    async def update_board(
+        username: str,
+        board: Board,
+        _authenticated_username: str = Depends(require_session),
+    ) -> BoardRecord:
         current_board_state_id, saved_board = repository.replace_board(username, board)
         return BoardRecord(
             username=username,
@@ -226,6 +244,7 @@ def create_app(
     async def create_chat_message(
         username: str,
         chat_message: ChatMessageCreate,
+        _authenticated_username: str = Depends(require_session),
     ) -> ChatReply:
         current_board_state_id, board = repository.get_board_snapshot(username)
         user_content = chat_message.message.strip()
@@ -291,7 +310,9 @@ def create_app(
         )
 
     @app.post("/api/chat/{username}/session", response_model=ChatSessionRecord)
-    async def start_chat_session(username: str) -> ChatSessionRecord:
+    async def start_chat_session(
+        username: str, _authenticated_username: str = Depends(require_session)
+    ) -> ChatSessionRecord:
         chat_id = repository.reset_chat_session(username)
         return ChatSessionRecord(chat_id=chat_id)
 

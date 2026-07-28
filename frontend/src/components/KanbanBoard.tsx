@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -20,6 +20,7 @@ import type { ChatMessage } from "@/lib/chat";
 type KanbanBoardProps = {
   onLogout?: () => void;
   username: string;
+  token: string;
 };
 
 type BoardResponse = {
@@ -44,7 +45,7 @@ const CHAT_REQUEST_TIMEOUT_MS = 20_000;
 const CHAT_UI_FAILSAFE_TIMEOUT_MS = 25_000;
 const RENAME_PERSIST_DEBOUNCE_MS = 400;
 
-export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
+export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -55,6 +56,20 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  const authHeader = useMemo(
+    () => ({ Authorization: `Bearer ${token}` }),
+    [token]
+  );
+
+  const handleUnauthorizedResponse = useCallback(
+    (response: Response) => {
+      if (response.status === 401) {
+        onLogout?.();
+      }
+    },
+    [onLogout]
+  );
+
   useEffect(() => {
     let isActive = true;
 
@@ -63,8 +78,11 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
       setErrorMessage("");
 
       try {
-        const response = await fetch(`/api/board/${username}`);
+        const response = await fetch(`/api/board/${username}`, {
+          headers: authHeader,
+        });
         if (!response.ok) {
+          handleUnauthorizedResponse(response);
           throw new Error("Unable to load board.");
         }
 
@@ -88,7 +106,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
     return () => {
       isActive = false;
     };
-  }, [username]);
+  }, [username, authHeader, handleUnauthorizedResponse]);
 
   useEffect(() => {
     setChatMessages([]);
@@ -139,11 +157,13 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          ...authHeader,
         },
         body: JSON.stringify(nextBoard),
       });
 
       if (!response.ok) {
+        handleUnauthorizedResponse(response);
         throw new Error("Unable to save board.");
       }
 
@@ -271,6 +291,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              ...authHeader,
             },
             body: JSON.stringify({ message }),
             signal: controller.signal,
@@ -280,6 +301,7 @@ export const KanbanBoard = ({ onLogout, username }: KanbanBoardProps) => {
         }
       })();
       if (!response.ok) {
+        handleUnauthorizedResponse(response);
         throw new Error("Unable to send chat message.");
       }
 

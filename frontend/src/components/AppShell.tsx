@@ -223,6 +223,7 @@ export const AppShell = () => {
           key={sessionKey}
           onLogout={handleLogout}
           username={authenticatedUsername}
+          token={authToken}
         />
       ) : (
         <div className="relative overflow-hidden">

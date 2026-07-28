@@ -2,6 +2,18 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Additional completed work (2026-07-28, part 2): enforce session tokens on board/chat routes
+
+Closed the "known gap" left by the previous change: the bearer token is now actually checked, not just issued.
+
+- **ADDED:** `require_session` dependency in `backend/app/main.py` — extracts `Authorization: Bearer <token>`, resolves it via `BoardRepository.get_username_for_token`, and 401s if the token is missing, unknown, or belongs to a different username than the `{username}` path parameter.
+- **CHANGED:** `GET/PUT /api/board/{username}` and `POST /api/chat/{username}/messages|session` all depend on `require_session`.
+- **CHANGED:** `KanbanBoard.tsx` now takes a required `token` prop, sends `Authorization: Bearer <token>` on every board/chat fetch, and calls `onLogout` automatically when a request comes back 401 (e.g. an expired/invalidated session). `AppShell.tsx` passes its stored `authToken` through.
+- **ADDED:** Backend tests for the two new failure modes (missing token, token for a different user) plus updated every existing board/chat test in `test_main.py` to sign up and authenticate first via a new `auth_headers()` helper.
+- **ADDED:** Frontend tests: the bearer token is asserted on the board fetch, and a new test confirms a 401 board response triggers `onLogout`.
+- Full verification pass: backend pytest (38 passed, +3 new), frontend vitest (22 passed, +2 new), Playwright integration suite (8 passed against the live enforced backend), `next build` and `eslint` clean.
+- **Next step:** multi-board-per-user support, now that every board/chat request is authenticated. The `boards` table currently has a `UNIQUE` constraint on `user_id` (one board per user) — that needs to change along with new list/create/switch-board endpoints and UI.
+
 ## Additional completed work (2026-07-28): backend-authoritative user management
 
 Replaced the frontend-only `localStorage` account store with real backend accounts, as the first step of a broader "comprehensive PM application" push (multi-board support, further hardening) that will continue across follow-up sessions.
