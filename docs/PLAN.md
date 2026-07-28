@@ -2,6 +2,16 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Session status (2026-07-28): user management + multi-board — complete
+
+The three "Additional completed work" entries below (parts 1-3, all dated 2026-07-28) cover one continuous session's work and are all **done, verified, and pushed** (`kanban-ai-pmt/main` at `6cb8183`):
+
+- Part 1 — backend-authoritative user management (real signup/login/logout, hashed passwords, session tokens).
+- Part 2 — session tokens actually enforced on the board/chat routes (closed part 1's known gap).
+- Part 3 — multi-board-per-user support (closed part 2's next step): create/list/switch/delete boards, board-scoped AI chat.
+
+Each part's own "Next step" note was resolved by the part that follows it, so none of those are open anymore. The only genuinely open follow-ups are the small polish items listed at the end of part 3 (replace the `window.prompt()` board-creation UI, support renaming a board's title outside of chat) — neither is a correctness or security gap, just UX polish for a future session.
+
 ## Additional completed work (2026-07-28, part 3): multi-board support
 
 Replaced the one-board-per-user model with real multi-board support, now that every board/chat request is authenticated (previous entry's "next step").
@@ -27,7 +37,7 @@ Closed the "known gap" left by the previous change: the bearer token is now actu
 - **ADDED:** Backend tests for the two new failure modes (missing token, token for a different user) plus updated every existing board/chat test in `test_main.py` to sign up and authenticate first via a new `auth_headers()` helper.
 - **ADDED:** Frontend tests: the bearer token is asserted on the board fetch, and a new test confirms a 401 board response triggers `onLogout`.
 - Full verification pass: backend pytest (38 passed, +3 new), frontend vitest (22 passed, +2 new), Playwright integration suite (8 passed against the live enforced backend), `next build` and `eslint` clean.
-- **Next step:** multi-board-per-user support, now that every board/chat request is authenticated. The `boards` table currently has a `UNIQUE` constraint on `user_id` (one board per user) — that needs to change along with new list/create/switch-board endpoints and UI.
+- **Next step (done — see part 3 above):** multi-board-per-user support, now that every board/chat request is authenticated.
 
 ## Additional completed work (2026-07-28): backend-authoritative user management
 
@@ -39,7 +49,7 @@ Replaced the frontend-only `localStorage` account store with real backend accoun
 - **ADDED:** `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout` routes with `SignupRequest`/`LoginRequest`/`AuthResponse` models. Signup returns 409 on duplicate username, 400 on invalid username/weak password; login returns 401 on bad credentials.
 - **ADDED:** The default `harry`/`kijanka` account is now seeded server-side (hashed) on first database initialization, replacing the old frontend-hardcoded default.
 - **CHANGED:** `AppShell.tsx` now calls `/api/auth/signup` and `/api/auth/login` instead of reading/writing `localStorage["pm:accounts"]`; the returned session token is stored in `sessionStorage` and sent as `Authorization: Bearer <token>` on the chat-session-start call and on `POST /api/auth/logout`.
-- **Explicit known gap (follow-up work, not yet done):** `GET/PUT /api/board/{username}` and `/api/chat/{username}/*` do not yet verify the bearer token against the path username — they still trust the path parameter, same as before this change. Next steps: enforce token verification on those routes (and update their tests + `frontend/tests/kanban.spec.ts` accordingly), then build multi-board-per-user support on top of authenticated requests.
+- **Known gap (done — see parts 2 and 3 above):** `GET/PUT /api/board/{username}` and `/api/chat/{username}/*` did not yet verify the bearer token against the path username at the time of this entry. Part 2 added that enforcement; part 3 then replaced these routes entirely with the board-scoped `/api/boards/...` and `/api/chat/{username}/{board_id}/...` surface.
 - Full verification pass: backend pytest (35 passed, +13 new auth tests), frontend vitest (20 passed, +2 new AppShell tests), Playwright integration suite (8 passed), `next build` and `eslint` clean.
 
 ## Additional completed work (2026-07-27, part 2)
