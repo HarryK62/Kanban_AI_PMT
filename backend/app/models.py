@@ -59,8 +59,21 @@ class Board(BaseModel):
 
 class BoardRecord(BaseModel):
     username: str
+    board_id: int
     current_board_state_id: int
     board: Board
+
+
+class BoardSummary(BaseModel):
+    board_id: int
+    title: str
+    current_board_state_id: int
+    created_at: str
+    updated_at: str
+
+
+class CreateBoardRequest(BaseModel):
+    title: str | None = None
 
 
 class ChatMessageCreate(BaseModel):

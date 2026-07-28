@@ -51,7 +51,7 @@ test("sends a chat request and reflects the returned board update", async ({ pag
   const board = defaultBoard();
   board.columns[0] = { ...board.columns[0], title: "Ideas" };
 
-  await page.route("**/api/chat/harry/messages", async (route) => {
+  await page.route("**/api/chat/harry/*/messages", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -140,6 +140,33 @@ test("logs out back to the login screen", async ({ page }) => {
   await page.getByLabel("Password").fill("kijanka");
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect(page.getByRole("heading", { name: "Session card" }).first()).toBeVisible();
+});
+
+test("creates a new board, switches to it, and deletes it", async ({ page }) => {
+  const username = `boarduser${Date.now()}`;
+  const password = "StrongPass1!";
+  await signupAndLogin(page, username, password);
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept("Second board"));
+  await page.getByRole("button", { name: /\+ new board/i }).click();
+
+  const secondTab = page.getByRole("tab", { name: "Second board" });
+  await expect(secondTab).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Second board" })).toBeVisible();
+  // A freshly created board starts with empty columns, unlike the sample
+  // "Kanban Studio" bootstrap board.
+  await expect(page.locator('[data-testid^="card-"]')).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "Kanban Studio" }).click();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: /delete second board/i })
+    .click();
+
+  await expect(page.getByRole("tab", { name: "Second board" })).not.toBeVisible();
 });
 
 test("loads the persisted board in a new window", async ({ browser, page }) => {

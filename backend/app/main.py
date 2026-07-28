@@ -19,13 +19,20 @@ from app.models import (
     AuthResponse,
     Board,
     BoardRecord,
+    BoardSummary,
     ChatMessageCreate,
     ChatReply,
     ChatSessionRecord,
+    CreateBoardRequest,
     LoginRequest,
     SignupRequest,
 )
-from app.repository import BoardRepository, InvalidCredentialsError, UsernameTakenError
+from app.repository import (
+    BoardNotFoundError,
+    BoardRepository,
+    InvalidCredentialsError,
+    UsernameTakenError,
+)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
@@ -186,7 +193,9 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
         token = repository.create_session(user_id)
-        return AuthResponse(username=repository.get_username_for_token(token) or "", token=token)
+        username = repository.get_username_for_token(token) or ""
+        repository.bootstrap_default_board(username)
+        return AuthResponse(username=username, token=token)
 
     @app.post("/api/auth/login", response_model=AuthResponse)
     async def login(payload: LoginRequest) -> AuthResponse:
@@ -216,40 +225,90 @@ def create_app(
             raise HTTPException(status_code=401, detail="Invalid or expired session.")
         return username
 
-    @app.get("/api/board/{username}", response_model=BoardRecord)
-    async def read_board(
+    @app.get("/api/boards/{username}", response_model=list[BoardSummary])
+    async def list_boards(
         username: str, _authenticated_username: str = Depends(require_session)
+    ) -> list[BoardSummary]:
+        return repository.list_boards(username)
+
+    @app.post("/api/boards/{username}", response_model=BoardRecord, status_code=201)
+    async def create_board(
+        username: str,
+        payload: CreateBoardRequest,
+        _authenticated_username: str = Depends(require_session),
     ) -> BoardRecord:
-        current_board_state_id, board = repository.get_or_create_board(username)
+        board_id, current_board_state_id, board = repository.create_board(
+            username, payload.title
+        )
         return BoardRecord(
             username=username,
+            board_id=board_id,
             current_board_state_id=current_board_state_id,
             board=board,
         )
 
-    @app.put("/api/board/{username}", response_model=BoardRecord)
+    @app.get("/api/boards/{username}/{board_id}", response_model=BoardRecord)
+    async def read_board(
+        username: str,
+        board_id: int,
+        _authenticated_username: str = Depends(require_session),
+    ) -> BoardRecord:
+        try:
+            current_board_state_id, board = repository.get_board(username, board_id)
+        except BoardNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+        return BoardRecord(
+            username=username,
+            board_id=board_id,
+            current_board_state_id=current_board_state_id,
+            board=board,
+        )
+
+    @app.put("/api/boards/{username}/{board_id}", response_model=BoardRecord)
     async def update_board(
         username: str,
+        board_id: int,
         board: Board,
         _authenticated_username: str = Depends(require_session),
     ) -> BoardRecord:
-        current_board_state_id, saved_board = repository.replace_board(username, board)
+        try:
+            current_board_state_id, saved_board = repository.replace_board(
+                username, board_id, board
+            )
+        except BoardNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
         return BoardRecord(
             username=username,
+            board_id=board_id,
             current_board_state_id=current_board_state_id,
             board=saved_board,
         )
 
-    @app.post("/api/chat/{username}/messages", response_model=ChatReply)
+    @app.delete("/api/boards/{username}/{board_id}", status_code=204)
+    async def delete_board(
+        username: str,
+        board_id: int,
+        _authenticated_username: str = Depends(require_session),
+    ) -> None:
+        try:
+            repository.delete_board(username, board_id)
+        except BoardNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+
+    @app.post("/api/chat/{username}/{board_id}/messages", response_model=ChatReply)
     async def create_chat_message(
         username: str,
+        board_id: int,
         chat_message: ChatMessageCreate,
         _authenticated_username: str = Depends(require_session),
     ) -> ChatReply:
-        current_board_state_id, board = repository.get_board_snapshot(username)
+        try:
+            current_board_state_id, board = repository.get_board(username, board_id)
+        except BoardNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
         user_content = chat_message.message.strip()
 
-        history = repository.list_chat_history(username)
+        history = repository.list_chat_history(username, board_id)
         client = ai_client or OpenRouterClient()
         try:
             raw_reply = await client.complete_messages(
@@ -276,6 +335,7 @@ def create_app(
 
         chat_id, _ = repository.append_chat_message(
             username=username,
+            board_id=board_id,
             role="user",
             content=user_content,
             board_state_id=current_board_state_id,
@@ -287,8 +347,9 @@ def create_app(
         if board_update_payload is not None:
           try:
             board_update = AiBoardUpdate.model_validate(board_update_payload)
-            next_board_state_id, next_board = repository.apply_board_state(
+            next_board_state_id, next_board = repository.replace_board(
               username,
+              board_id,
               board_update.board,
             )
           except Exception:
@@ -298,6 +359,7 @@ def create_app(
 
         _, assistant_message = repository.append_chat_message(
             username=username,
+            board_id=board_id,
             role="assistant",
           content=reply_text,
             board_state_id=next_board_state_id,
@@ -309,11 +371,16 @@ def create_app(
             board=next_board,
         )
 
-    @app.post("/api/chat/{username}/session", response_model=ChatSessionRecord)
+    @app.post("/api/chat/{username}/{board_id}/session", response_model=ChatSessionRecord)
     async def start_chat_session(
-        username: str, _authenticated_username: str = Depends(require_session)
+        username: str,
+        board_id: int,
+        _authenticated_username: str = Depends(require_session),
     ) -> ChatSessionRecord:
-        chat_id = repository.reset_chat_session(username)
+        try:
+            chat_id = repository.reset_chat_session(username, board_id)
+        except BoardNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
         return ChatSessionRecord(chat_id=chat_id)
 
     @app.post("/api/ai/test", response_model=AiTestResponse)

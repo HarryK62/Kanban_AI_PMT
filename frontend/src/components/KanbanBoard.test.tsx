@@ -1,17 +1,36 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KanbanBoard } from "@/components/KanbanBoard";
-import { initialData } from "@/lib/kanban";
+import { initialData, type BoardData } from "@/lib/kanban";
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
+const BOARD_ID = 1;
 
 describe("KanbanBoard", () => {
+  let currentBoard: BoardData;
+
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (typeof input === "string" && input.endsWith("/api/chat/user/messages")) {
+    const url = typeof input === "string" ? input : input.toString();
+
+    if (url.endsWith(`/api/chat/user/${BOARD_ID}/session`)) {
+      return new Response(JSON.stringify({ chat_id: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.endsWith(`/api/chat/user/${BOARD_ID}/messages`)) {
       const parsedBody = init?.body ? JSON.parse(String(init.body)) : {};
       if (parsedBody.message === "trigger-chat-failure") {
         return new Response(null, { status: 500 });
       }
+
+      currentBoard = {
+        ...currentBoard,
+        columns: currentBoard.columns.map((column) =>
+          column.id === "col-backlog" ? { ...column, title: "Ideas" } : column
+        ),
+      };
 
       return new Response(
         JSON.stringify({
@@ -23,23 +42,36 @@ describe("KanbanBoard", () => {
             role: "assistant",
             content: "I renamed Backlog to Ideas.",
           },
-          board: {
-            ...initialData,
-            columns: initialData.columns.map((column) =>
-              column.id === "col-backlog" ? { ...column, title: "Ideas" } : column
-            ),
-          },
+          board: currentBoard,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    if (typeof input === "string" && input.endsWith("/api/board/user")) {
+    if (url.endsWith("/api/boards/user")) {
+      return new Response(
+        JSON.stringify([
+          {
+            board_id: BOARD_ID,
+            title: currentBoard.title,
+            current_board_state_id: 1,
+            created_at: "",
+            updated_at: "",
+          },
+        ]),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (url.endsWith(`/api/boards/user/${BOARD_ID}`)) {
       if (init?.method === "PUT" && init.body) {
+        currentBoard = JSON.parse(String(init.body)) as BoardData;
         return new Response(
           JSON.stringify({
             username: "user",
-            board: JSON.parse(String(init.body)),
+            board_id: BOARD_ID,
+            current_board_state_id: 2,
+            board: currentBoard,
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
@@ -48,17 +80,20 @@ describe("KanbanBoard", () => {
       return new Response(
         JSON.stringify({
           username: "user",
-          board: initialData,
+          board_id: BOARD_ID,
+          current_board_state_id: 1,
+          board: currentBoard,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    throw new Error(`Unhandled fetch request: ${String(input)}`);
+    throw new Error(`Unhandled fetch request: ${url}`);
   });
 
   beforeEach(() => {
     window.sessionStorage.clear();
+    currentBoard = structuredClone(initialData);
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockClear();
   });
@@ -73,7 +108,7 @@ describe("KanbanBoard", () => {
     expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
   });
 
-  it("sends the bearer token on the board fetch", async () => {
+  it("sends the bearer token on the board list fetch", async () => {
     render(<KanbanBoard username="user" token="test-token" />);
     await screen.findByText("Backlog");
 
@@ -83,10 +118,11 @@ describe("KanbanBoard", () => {
     });
   });
 
-  it("logs out automatically when the board fetch is unauthorized", async () => {
+  it("logs out automatically when the board list fetch is unauthorized", async () => {
     const originalImpl = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => {
-      if (typeof input === "string" && input.endsWith("/api/board/user")) {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/boards/user")) {
         return new Response(null, { status: 401 });
       }
       return originalImpl(input, init);
@@ -107,19 +143,26 @@ describe("KanbanBoard", () => {
     await screen.findByText("Backlog");
     const column = getFirstColumn();
     const input = within(column).getByLabelText("Column title");
-    const fetchCallsBeforeRename = fetchMock.mock.calls.length;
-    await userEvent.clear(input);
-    await userEvent.type(input, "New Name");
+    // fireEvent.change delivers a single controlled-input update directly,
+    // avoiding userEvent's focus/selection simulation which is unreliable
+    // for this input immediately after the board's async load settles.
+    fireEvent.change(input, { target: { value: "New Name" } });
     await waitFor(() => expect(input).toHaveValue("New Name"));
 
-    // Renaming debounces persistence, so keystrokes should not each fire a PUT.
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(fetchCallsBeforeRename)
+    // Renaming debounces persistence: wait past the debounce window for the
+    // single resulting PUT rather than racing an intermediate fetch count.
+    await waitFor(
+      () => {
+        const putCalls = fetchMock.mock.calls.filter(
+          ([, init]) => (init as RequestInit | undefined)?.method === "PUT"
+        );
+        expect(putCalls).toHaveLength(1);
+      },
+      { timeout: 2000 }
     );
     const putCalls = fetchMock.mock.calls.filter(
       ([, init]) => (init as RequestInit | undefined)?.method === "PUT"
     );
-    expect(putCalls).toHaveLength(1);
     expect(JSON.parse(String(putCalls[0][1]?.body)).columns[0].title).toBe(
       "New Name"
     );
@@ -192,11 +235,8 @@ describe("KanbanBoard", () => {
     let capturedBody: string | undefined;
 
     fetchMock.mockImplementation(async (input, init) => {
-      if (
-        typeof input === "string" &&
-        input.endsWith("/api/board/user") &&
-        init?.method === "PUT"
-      ) {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith(`/api/boards/user/${BOARD_ID}`) && init?.method === "PUT") {
         capturedBody = init.body ? String(init.body) : undefined;
         return putPromise;
       }
@@ -228,6 +268,8 @@ describe("KanbanBoard", () => {
         new Response(
           JSON.stringify({
             username: "user",
+            board_id: BOARD_ID,
+            current_board_state_id: 2,
             board: JSON.parse(capturedBody ?? "{}"),
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }

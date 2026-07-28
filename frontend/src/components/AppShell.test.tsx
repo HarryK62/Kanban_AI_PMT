@@ -5,27 +5,42 @@ import { initialData, type BoardData } from "@/lib/kanban";
 
 type Account = { username: string; password: string };
 
+const jsonResponse = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+
 describe("AppShell", () => {
-  let boardsByUser: Record<string, BoardData>;
   let accountsByUsername: Record<string, Account>;
+  let boardIdByUsername: Record<string, number>;
+  let boardContentById: Record<number, BoardData>;
+  let boardStateVersionById: Record<number, number>;
+  let nextBoardId: number;
+
+  const bootstrapBoard = (username: string) => {
+    const boardId = nextBoardId++;
+    boardIdByUsername[username] = boardId;
+    boardContentById[boardId] = structuredClone(initialData);
+    boardStateVersionById[boardId] = 1;
+    return boardId;
+  };
+
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
 
     if (url === "/api/auth/signup") {
       const username = String(body?.username);
       const password = String(body?.password);
       if (accountsByUsername[username]) {
-        return new Response(
-          JSON.stringify({ detail: "That username already exists." }),
-          { status: 409, headers: { "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ detail: "That username already exists." }, 409);
       }
       accountsByUsername[username] = { username, password };
-      return new Response(
-        JSON.stringify({ username, token: `token-${username}` }),
-        { status: 201, headers: { "Content-Type": "application/json" } }
-      );
+      bootstrapBoard(username);
+      return jsonResponse({ username, token: `token-${username}` }, 201);
     }
 
     if (url === "/api/auth/login") {
@@ -33,60 +48,78 @@ describe("AppShell", () => {
       const password = String(body?.password);
       const account = accountsByUsername[username];
       if (!account || account.password !== password) {
-        return new Response(
-          JSON.stringify({ detail: "Invalid username or password." }),
-          { status: 401, headers: { "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ detail: "Invalid username or password." }, 401);
       }
-      return new Response(
-        JSON.stringify({ username, token: `token-${username}` }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ username, token: `token-${username}` });
     }
 
     if (url === "/api/auth/logout") {
       return new Response(null, { status: 204 });
     }
 
-    if (url.includes("/api/chat/") && url.endsWith("/session")) {
-      return new Response(
-        JSON.stringify({
-          chat_id: 1,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    if (url.includes("/api/board/")) {
-      const username = url.split("/").at(-1);
-      if (!username) {
-        throw new Error(`Invalid board request: ${url}`);
-      }
-
-      if (!boardsByUser[username]) {
-        boardsByUser[username] = structuredClone(initialData);
-      }
-
-      if (init?.method === "PUT" && init.body) {
-        boardsByUser[username] = JSON.parse(String(init.body)) as BoardData;
-        return new Response(
-          JSON.stringify({
+    const boardsListMatch = url.match(/^\/api\/boards\/([^/]+)$/);
+    if (boardsListMatch) {
+      const username = boardsListMatch[1];
+      const boardId = boardIdByUsername[username];
+      if (init?.method === "POST") {
+        const title =
+          typeof body?.title === "string" && body.title.trim()
+            ? body.title.trim()
+            : "New board";
+        const newBoardId = nextBoardId++;
+        boardContentById[newBoardId] = { ...structuredClone(initialData), title };
+        boardStateVersionById[newBoardId] = 1;
+        return jsonResponse(
+          {
             username,
-            current_board_state_id: 2,
-            board: boardsByUser[username],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+            board_id: newBoardId,
+            current_board_state_id: 1,
+            board: boardContentById[newBoardId],
+          },
+          201
         );
       }
 
-      return new Response(
-        JSON.stringify({
+      if (boardId === undefined) {
+        return jsonResponse([]);
+      }
+      return jsonResponse([
+        {
+          board_id: boardId,
+          title: boardContentById[boardId].title,
+          current_board_state_id: boardStateVersionById[boardId],
+          created_at: "",
+          updated_at: "",
+        },
+      ]);
+    }
+
+    const boardDetailMatch = url.match(/^\/api\/boards\/([^/]+)\/(\d+)$/);
+    if (boardDetailMatch) {
+      const [, username, boardIdText] = boardDetailMatch;
+      const boardId = Number(boardIdText);
+
+      if (init?.method === "PUT" && init.body) {
+        boardContentById[boardId] = JSON.parse(String(init.body)) as BoardData;
+        boardStateVersionById[boardId] += 1;
+        return jsonResponse({
           username,
-          current_board_state_id: 1,
-          board: boardsByUser[username],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+          board_id: boardId,
+          current_board_state_id: boardStateVersionById[boardId],
+          board: boardContentById[boardId],
+        });
+      }
+
+      return jsonResponse({
+        username,
+        board_id: boardId,
+        current_board_state_id: boardStateVersionById[boardId],
+        board: boardContentById[boardId],
+      });
+    }
+
+    if (url.includes("/api/chat/") && url.endsWith("/session")) {
+      return jsonResponse({ chat_id: 1 });
     }
 
     throw new Error(`Unhandled fetch request: ${url}`);
@@ -95,12 +128,12 @@ describe("AppShell", () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    boardsByUser = {
-      harry: structuredClone(initialData),
-    };
-    accountsByUsername = {
-      harry: { username: "harry", password: "kijanka" },
-    };
+    accountsByUsername = { harry: { username: "harry", password: "kijanka" } };
+    boardIdByUsername = {};
+    boardContentById = {};
+    boardStateVersionById = {};
+    nextBoardId = 1;
+    bootstrapBoard("harry");
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockClear();
   });
@@ -125,7 +158,8 @@ describe("AppShell", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/chat/harry/session", {
+    const harryBoardId = boardIdByUsername.harry;
+    expect(fetchMock).toHaveBeenCalledWith(`/api/chat/harry/${harryBoardId}/session`, {
       method: "POST",
       headers: { Authorization: "Bearer token-harry" },
     });
@@ -157,7 +191,8 @@ describe("AppShell", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/chat/newuser/session", {
+    const newuserBoardId = boardIdByUsername.newuser;
+    expect(fetchMock).toHaveBeenCalledWith(`/api/chat/newuser/${newuserBoardId}/session`, {
       method: "POST",
       headers: { Authorization: "Bearer token-newuser" },
     });
@@ -217,8 +252,7 @@ describe("AppShell", () => {
     render(<AppShell />);
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/chat/harry/session", { method: "POST" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/board/harry", {
+    expect(fetchMock).toHaveBeenCalledWith("/api/boards/harry", {
       headers: { Authorization: "Bearer token-harry" },
     });
   });

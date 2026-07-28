@@ -2,6 +2,21 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Additional completed work (2026-07-28, part 3): multi-board support
+
+Replaced the one-board-per-user model with real multi-board support, now that every board/chat request is authenticated (previous entry's "next step").
+
+- **CHANGED:** `boards.user_id` no longer has a `UNIQUE` constraint; a user can own any number of boards. `chats` now has a `UNIQUE` `board_id` (was `UNIQUE` `user_id`) so each board gets its own isolated AI chat thread instead of one chat shared across all of a user's boards.
+- **ADDED:** `BoardRepository.initialize()` detects the old single-board schema (legacy `UNIQUE(user_id)` on `boards`, or `chats` missing `board_id`) and rebuilds those four tables in place — acceptable one-time data loss since `backend/data/` is a local, gitignored dev database with no production deployment.
+- **ADDED:** `BoardRepository`: `create_board` (empty starter board, used for "+ New board"), `bootstrap_default_board` (sample-filled board, used once at signup/seed time), `list_boards`, `get_board`, `delete_board`; `replace_board`/chat methods now take an explicit `board_id`. New `UsernameNotFoundError`/`BoardNotFoundError` exceptions.
+- **CHANGED:** API surface: `/api/board/{username}` and `/api/chat/{username}/messages|session` are replaced by `GET/POST /api/boards/{username}`, `GET/PUT/DELETE /api/boards/{username}/{board_id}`, and `POST /api/chat/{username}/{board_id}/messages|session`. A `board_id` that exists but belongs to a different user 404s rather than leaking content.
+- **ADDED:** `POST /api/auth/signup` now also calls `bootstrap_default_board` so new accounts land with one sample-filled board.
+- **CHANGED:** `KanbanBoard.tsx` fetches the board list on mount, renders a tab-style switcher (create/select/delete), and drives the active board's load/save/chat calls off the selected `board_id`. `AppShell.tsx` no longer eagerly starts a chat session at login — that's now board-scoped and owned by `KanbanBoard` (fires whenever the active board changes).
+- **ADDED:** Backend tests for board list/create/delete, cross-user board isolation (own-path-but-someone-else's-board-id returns 404), and per-board chat history isolation, both at the repository level (`test_repository.py`) and the route level (`test_main.py`). Frontend: new Playwright flow that creates a second board, switches to it, and deletes it. All pre-existing tests updated to the new API shape.
+- **Known test-environment note:** the "rename a column" Vitest test switched from `userEvent.clear()`/`userEvent.type()` to `fireEvent.change()`, because `userEvent`'s focus/selection simulation proved unreliable specifically once the board load became a two-step async sequence (board list, then the selected board's content) — worth remembering if similar flakiness shows up in future input-editing tests.
+- Full verification pass: backend pytest (53 passed, +15 new), frontend vitest (22 passed), Playwright integration suite (9 passed, +1 new), `next build` and `eslint` clean.
+- **Next steps:** the board switcher's "create board" flow uses a bare `window.prompt()` for the title — worth replacing with an inline form for a more polished UX; board titles aren't yet renameable after creation without going through a chat request.
+
 ## Additional completed work (2026-07-28, part 2): enforce session tokens on board/chat routes
 
 Closed the "known gap" left by the previous change: the bearer token is now actually checked, not just issued.

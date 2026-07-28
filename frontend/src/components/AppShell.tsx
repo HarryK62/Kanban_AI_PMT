@@ -158,17 +158,6 @@ export const AppShell = () => {
       const { username: loggedInUsername, token } =
         (await loginResponse.json()) as AuthResponse;
 
-      const sessionResponse = await fetch(
-        `/api/chat/${loggedInUsername}/session`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (!sessionResponse.ok) {
-        throw new Error("Unable to start AI chat session.");
-      }
-
       setIsAuthenticated(true);
       setAuthenticatedUsername(loggedInUsername);
       setAuthToken(token);
