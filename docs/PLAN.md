@@ -2,6 +2,19 @@
 
 This document is the execution plan for the Project Management MVP. It breaks the work into checklists, defines tests for each phase, and states the success criteria required before moving on.
 
+## Additional completed work (2026-07-28): backend-authoritative user management
+
+Replaced the frontend-only `localStorage` account store with real backend accounts, as the first step of a broader "comprehensive PM application" push (multi-board support, further hardening) that will continue across follow-up sessions.
+
+- **ADDED:** `backend/app/auth.py` — PBKDF2-HMAC-SHA256 password hashing with a random per-user salt, constant-time verification, secure token generation (`secrets.token_urlsafe`), username normalization, and server-side username-format/password-strength validation.
+- **ADDED:** `sessions` table and a `password_hash` column migration (`ALTER TABLE ... ADD COLUMN`, applied idempotently in `BoardRepository.initialize()`) on the existing `users` table.
+- **ADDED:** `BoardRepository.create_user/verify_login/create_session/get_username_for_token/delete_session`.
+- **ADDED:** `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout` routes with `SignupRequest`/`LoginRequest`/`AuthResponse` models. Signup returns 409 on duplicate username, 400 on invalid username/weak password; login returns 401 on bad credentials.
+- **ADDED:** The default `harry`/`kijanka` account is now seeded server-side (hashed) on first database initialization, replacing the old frontend-hardcoded default.
+- **CHANGED:** `AppShell.tsx` now calls `/api/auth/signup` and `/api/auth/login` instead of reading/writing `localStorage["pm:accounts"]`; the returned session token is stored in `sessionStorage` and sent as `Authorization: Bearer <token>` on the chat-session-start call and on `POST /api/auth/logout`.
+- **Explicit known gap (follow-up work, not yet done):** `GET/PUT /api/board/{username}` and `/api/chat/{username}/*` do not yet verify the bearer token against the path username — they still trust the path parameter, same as before this change. Next steps: enforce token verification on those routes (and update their tests + `frontend/tests/kanban.spec.ts` accordingly), then build multi-board-per-user support on top of authenticated requests.
+- Full verification pass: backend pytest (35 passed, +13 new auth tests), frontend vitest (20 passed, +2 new AppShell tests), Playwright integration suite (8 passed), `next build` and `eslint` clean.
+
 ## Additional completed work (2026-07-27, part 2)
 
 Addressed the remaining medium- and low-priority findings from `docs/code_review.md` (2026-03-24), plus its noted test coverage gaps.

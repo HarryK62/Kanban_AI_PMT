@@ -159,7 +159,7 @@ def test_board_replace_for_brand_new_user_bootstraps_then_applies_update(
 
     with sqlite3.connect(db_path) as connection:
         users = connection.execute(
-            "SELECT username FROM users"
+            "SELECT username FROM users ORDER BY id ASC"
         ).fetchall()
         boards = connection.execute(
             "SELECT current_board_state_id FROM boards"
@@ -168,7 +168,8 @@ def test_board_replace_for_brand_new_user_bootstraps_then_applies_update(
             "SELECT id, previous_board_state_id FROM board_states ORDER BY id ASC"
         ).fetchall()
 
-    assert users == [("newcomer",)]
+    # The seeded default account is created alongside the schema on first use.
+    assert users == [("harry",), ("newcomer",)]
     assert len(boards) == 1
     # The bootstrap default board state is created first, then replaced by the
     # incoming payload as a second, linked board state.

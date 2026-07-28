@@ -99,3 +99,18 @@ class AiBoardUpdate(BaseModel):
 class AiStructuredReply(BaseModel):
     reply: str = Field(min_length=1)
     board_update: AiBoardUpdate | None = None
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class AuthResponse(BaseModel):
+    username: str
+    token: str

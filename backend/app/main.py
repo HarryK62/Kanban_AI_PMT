@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,15 +13,19 @@ from app.ai import (
     OpenRouterRequestError,
     build_chat_messages,
 )
+from app.auth import InvalidUsernameError, WeakPasswordError
 from app.models import (
   AiBoardUpdate,
+    AuthResponse,
     Board,
     BoardRecord,
     ChatMessageCreate,
     ChatReply,
     ChatSessionRecord,
+    LoginRequest,
+    SignupRequest,
 )
-from app.repository import BoardRepository
+from app.repository import BoardRepository, InvalidCredentialsError, UsernameTakenError
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
@@ -31,6 +35,16 @@ DEFAULT_DB_PATH = ROOT_DIR / "backend" / "data" / "app.db"
 class AiTestResponse(BaseModel):
     model: str
     reply: str
+
+
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if authorization is None:
+        return None
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        return None
+    token = authorization[len(prefix):].strip()
+    return token or None
 
 
 def placeholder_html() -> str:
@@ -161,6 +175,34 @@ def create_app(
     @app.get("/api/hello")
     async def read_hello() -> dict[str, str]:
         return {"message": "hello from fastapi"}
+
+    @app.post("/api/auth/signup", response_model=AuthResponse, status_code=201)
+    async def signup(payload: SignupRequest) -> AuthResponse:
+        try:
+            user_id = repository.create_user(payload.username, payload.password)
+        except (InvalidUsernameError, WeakPasswordError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        except UsernameTakenError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+
+        token = repository.create_session(user_id)
+        return AuthResponse(username=repository.get_username_for_token(token) or "", token=token)
+
+    @app.post("/api/auth/login", response_model=AuthResponse)
+    async def login(payload: LoginRequest) -> AuthResponse:
+        try:
+            user_id = repository.verify_login(payload.username, payload.password)
+        except InvalidCredentialsError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from None
+
+        token = repository.create_session(user_id)
+        return AuthResponse(username=repository.get_username_for_token(token) or "", token=token)
+
+    @app.post("/api/auth/logout", status_code=204)
+    async def logout(authorization: str | None = Header(default=None)) -> None:
+        token = _extract_bearer_token(authorization)
+        if token is not None:
+            repository.delete_session(token)
 
     @app.get("/api/board/{username}", response_model=BoardRecord)
     async def read_board(username: str) -> BoardRecord:

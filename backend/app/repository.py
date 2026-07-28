@@ -4,10 +4,28 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.ai import json_dumps
+from app.auth import (
+    generate_token,
+    hash_password,
+    normalize_username,
+    validate_password_strength,
+    validate_username,
+    verify_password,
+)
 from app.models import Board, ChatMessageRecord
 
 
 DEFAULT_USERNAME = "user"
+
+SEEDED_ACCOUNTS = (("harry", "kijanka"),)
+
+
+class UsernameTakenError(ValueError):
+    """Raised when signup targets a username that already exists."""
+
+
+class InvalidCredentialsError(ValueError):
+    """Raised when login credentials do not match a stored account."""
 
 
 def current_timestamp() -> str:
@@ -140,8 +158,49 @@ class BoardRepository:
                   FOREIGN KEY (board_state_id) REFERENCES board_states(id),
                   UNIQUE(chat_id, sequence_number)
                 );
+
+                CREATE TABLE IF NOT EXISTS sessions (
+                  id INTEGER PRIMARY KEY,
+                  user_id INTEGER NOT NULL,
+                  token TEXT NOT NULL UNIQUE,
+                  created_at TEXT NOT NULL,
+                  FOREIGN KEY (user_id) REFERENCES users(id)
+                );
                 """
             )
+
+            existing_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+            }
+            if "password_hash" not in existing_columns:
+                connection.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+
+            for username, password in SEEDED_ACCOUNTS:
+                self._seed_account_if_missing(connection, username, password)
+
+    def _seed_account_if_missing(
+        self, connection: sqlite3.Connection, username: str, password: str
+    ) -> None:
+        normalized_username = normalize_username(username)
+        row = connection.execute(
+            "SELECT id, password_hash FROM users WHERE username = ?",
+            (normalized_username,),
+        ).fetchone()
+        if row is not None:
+            if row["password_hash"] is None:
+                connection.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (hash_password(password), row["id"]),
+                )
+            return
+
+        connection.execute(
+            """
+            INSERT INTO users (username, created_at, password_hash)
+            VALUES (?, ?, ?)
+            """,
+            (normalized_username, current_timestamp(), hash_password(password)),
+        )
 
     def get_or_create_board(self, username: str) -> tuple[int, Board]:
         with self.connect() as connection:
@@ -182,6 +241,75 @@ class BoardRepository:
                 (next_board_state_id, timestamp, existing_board["board_id"]),
             )
             return next_board_state_id, board
+
+    def create_user(self, username: str, password: str) -> int:
+        normalized_username = normalize_username(username)
+        validate_username(normalized_username)
+        validate_password_strength(password)
+
+        with self.connect() as connection:
+            existing_row = connection.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (normalized_username,),
+            ).fetchone()
+            if existing_row is not None:
+                raise UsernameTakenError(
+                    f"Username '{normalized_username}' is already taken."
+                )
+
+            cursor = connection.execute(
+                """
+                INSERT INTO users (username, created_at, password_hash)
+                VALUES (?, ?, ?)
+                """,
+                (normalized_username, current_timestamp(), hash_password(password)),
+            )
+            return int(cursor.lastrowid)
+
+    def verify_login(self, username: str, password: str) -> int:
+        normalized_username = normalize_username(username)
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id, password_hash FROM users WHERE username = ?",
+                (normalized_username,),
+            ).fetchone()
+
+        if (
+            row is None
+            or row["password_hash"] is None
+            or not verify_password(password, row["password_hash"])
+        ):
+            raise InvalidCredentialsError("Invalid username or password.")
+        return int(row["id"])
+
+    def create_session(self, user_id: int) -> str:
+        token = generate_token()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO sessions (user_id, token, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (user_id, token, current_timestamp()),
+            )
+        return token
+
+    def get_username_for_token(self, token: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT users.username AS username
+                FROM sessions
+                JOIN users ON users.id = sessions.user_id
+                WHERE sessions.token = ?
+                """,
+                (token,),
+            ).fetchone()
+        return row["username"] if row is not None else None
+
+    def delete_session(self, token: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
 
     def _get_or_create_user(self, connection: sqlite3.Connection, username: str) -> int:
         row = connection.execute(

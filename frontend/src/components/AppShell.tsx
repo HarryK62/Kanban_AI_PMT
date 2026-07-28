@@ -5,78 +5,22 @@ import { KanbanBoard } from "@/components/KanbanBoard";
 
 const AUTHENTICATED_SESSION_KEY = "pm:isAuthenticated";
 const AUTHENTICATED_USERNAME_SESSION_KEY = "pm:authenticatedUsername";
-const ACCOUNTS_STORAGE_KEY = "pm:accounts";
-
-type Account = {
-  username: string;
-  password: string;
-};
-
-const DEFAULT_ACCOUNT: Account = {
-  username: "harry",
-  password: "kijanka",
-};
+const AUTH_TOKEN_SESSION_KEY = "pm:authToken";
 
 const normalizeUsername = (value: string) => value.trim().toLowerCase();
 
-const getStoredAccounts = (): Account[] => {
-  if (typeof window === "undefined") {
-    return [DEFAULT_ACCOUNT];
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
-    if (!rawValue) {
-      return [DEFAULT_ACCOUNT];
-    }
-
-    const parsedValue = JSON.parse(rawValue) as unknown;
-    if (!Array.isArray(parsedValue)) {
-      return [DEFAULT_ACCOUNT];
-    }
-
-    const parsedAccounts = parsedValue
-      .filter(
-        (item): item is Account =>
-          Boolean(item) &&
-          typeof item === "object" &&
-          typeof (item as Account).username === "string" &&
-          typeof (item as Account).password === "string"
-      )
-      .map((account) => ({
-        username: normalizeUsername(account.username),
-        password: account.password,
-      }));
-
-    const accountsByUsername = new Map<string, Account>();
-    accountsByUsername.set(DEFAULT_ACCOUNT.username, DEFAULT_ACCOUNT);
-    for (const account of parsedAccounts) {
-      if (!account.username) {
-        continue;
-      }
-      accountsByUsername.set(account.username, account);
-    }
-
-    return [...accountsByUsername.values()];
-  } catch {
-    return [DEFAULT_ACCOUNT];
-  }
+type AuthResponse = {
+  username: string;
+  token: string;
 };
 
-const saveAccounts = (accounts: Account[]) => {
-  const accountsByUsername = new Map<string, Account>();
-  accountsByUsername.set(DEFAULT_ACCOUNT.username, DEFAULT_ACCOUNT);
-  for (const account of accounts) {
-    accountsByUsername.set(normalizeUsername(account.username), {
-      username: normalizeUsername(account.username),
-      password: account.password,
-    });
+const parseErrorDetail = async (response: Response): Promise<string> => {
+  try {
+    const data = (await response.json()) as { detail?: string };
+    return typeof data.detail === "string" ? data.detail : "";
+  } catch {
+    return "";
   }
-
-  window.localStorage.setItem(
-    ACCOUNTS_STORAGE_KEY,
-    JSON.stringify([...accountsByUsername.values()])
-  );
 };
 
 const getPasswordChecks = (password: string) => {
@@ -112,6 +56,7 @@ export const AppShell = () => {
   const [successMessage, setSuccessMessage] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authenticatedUsername, setAuthenticatedUsername] = useState("");
+  const [authToken, setAuthToken] = useState("");
   const [sessionKey, setSessionKey] = useState(0);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
@@ -124,9 +69,11 @@ export const AppShell = () => {
     const storedUsername = window.sessionStorage.getItem(
       AUTHENTICATED_USERNAME_SESSION_KEY
     );
+    const storedToken = window.sessionStorage.getItem(AUTH_TOKEN_SESSION_KEY);
     if (hasAuthenticatedSession && storedUsername) {
       setIsAuthenticated(true);
       setAuthenticatedUsername(storedUsername);
+      setAuthToken(storedToken ?? "");
     }
     setIsRestoringSession(false);
   }, []);
@@ -163,55 +110,74 @@ export const AppShell = () => {
         return;
       }
 
-      const existingAccounts = getStoredAccounts();
-      const userAlreadyExists = existingAccounts.some(
-        (account) => account.username === normalizedUsername
-      );
+      setIsStartingSession(true);
+      try {
+        const response = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: normalizedUsername, password }),
+        });
 
-      if (userAlreadyExists) {
-        setErrorMessage("That username already exists. Please sign in.");
-        return;
+        if (response.status === 409) {
+          setErrorMessage("That username already exists. Please sign in.");
+          return;
+        }
+
+        if (!response.ok) {
+          const detail = await parseErrorDetail(response);
+          setErrorMessage(detail || "Unable to create your account right now.");
+          return;
+        }
+
+        setAuthMode("signin");
+        setPassword("");
+        setConfirmPassword("");
+        setSuccessMessage("Account created. You can sign in now.");
+      } catch {
+        setErrorMessage("Unable to reach the server right now.");
+      } finally {
+        setIsStartingSession(false);
       }
-
-      saveAccounts([
-        ...existingAccounts,
-        { username: normalizedUsername, password },
-      ]);
-      setAuthMode("signin");
-      setPassword("");
-      setConfirmPassword("");
-      setSuccessMessage("Account created. You can sign in now.");
-      return;
-    }
-
-    const accounts = getStoredAccounts();
-    const matchingAccount = accounts.find(
-      (account) =>
-        account.username === normalizedUsername && account.password === password
-    );
-
-    if (!matchingAccount) {
-      setErrorMessage("Invalid username or password.");
       return;
     }
 
     setIsStartingSession(true);
 
     try {
-      const response = await fetch(`/api/chat/${normalizedUsername}/session`, {
+      const loginResponse = await fetch("/api/auth/login", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: normalizedUsername, password }),
       });
-      if (!response.ok) {
+
+      if (!loginResponse.ok) {
+        setErrorMessage("Invalid username or password.");
+        return;
+      }
+
+      const { username: loggedInUsername, token } =
+        (await loginResponse.json()) as AuthResponse;
+
+      const sessionResponse = await fetch(
+        `/api/chat/${loggedInUsername}/session`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!sessionResponse.ok) {
         throw new Error("Unable to start AI chat session.");
       }
 
       setIsAuthenticated(true);
-      setAuthenticatedUsername(normalizedUsername);
+      setAuthenticatedUsername(loggedInUsername);
+      setAuthToken(token);
       window.sessionStorage.setItem(AUTHENTICATED_SESSION_KEY, "true");
       window.sessionStorage.setItem(
         AUTHENTICATED_USERNAME_SESSION_KEY,
-        normalizedUsername
+        loggedInUsername
       );
+      window.sessionStorage.setItem(AUTH_TOKEN_SESSION_KEY, token);
       setSessionKey((currentKey) => currentKey + 1);
       setPassword("");
       setConfirmPassword("");
@@ -223,10 +189,21 @@ export const AppShell = () => {
   };
 
   const handleLogout = () => {
+    if (authToken) {
+      void fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}` },
+      }).catch(() => {
+        // Best-effort: the client-side session is cleared regardless.
+      });
+    }
+
     window.sessionStorage.removeItem(AUTHENTICATED_SESSION_KEY);
     window.sessionStorage.removeItem(AUTHENTICATED_USERNAME_SESSION_KEY);
+    window.sessionStorage.removeItem(AUTH_TOKEN_SESSION_KEY);
     setIsAuthenticated(false);
     setAuthenticatedUsername("");
+    setAuthToken("");
     setUsername("");
     setPassword("");
     setConfirmPassword("");

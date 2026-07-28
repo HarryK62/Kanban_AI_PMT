@@ -40,6 +40,7 @@ backend/app/
   models.py      # Pydantic domain models: Board, Card, Column, ChatReply, AiStructuredReply
   repository.py  # BoardRepository — all SQLite access
   ai.py          # OpenRouterClient, build_chat_messages
+  auth.py        # password hashing (pbkdf2_hmac), token generation, username/password validation
 
 frontend/src/
   lib/kanban.ts                  # BoardData type and pure board logic (moveCard, createId)
@@ -71,7 +72,9 @@ OpenRouter model `openai/gpt-oss-120b`. The AI is instructed to return JSON matc
 
 **Auth**
 
-Frontend-only, no backend auth endpoints. `AppShell.tsx` stores accounts (username/password) in `localStorage` under `pm:accounts`, seeded with a default account (`harry`/`kijanka`). Sign-up validates username format, password strength (length/upper/lower/number/symbol), and confirmation match. The active session (`isAuthenticated`, username) lives in `sessionStorage`, so it resets on new window/refresh. The signed-in username is passed as the `username` path parameter to all backend routes — the backend trusts it as-is with no verification.
+Backend-authoritative. `users.password_hash` stores salted PBKDF2-HMAC-SHA256 hashes (`app/auth.py`); a seeded default account (`harry`/`kijanka`) is created on first `BoardRepository.initialize()`. `POST /api/auth/signup` validates username format and password strength (length/upper/lower/number/symbol) server-side and returns 400/409 on failure; `POST /api/auth/login` verifies credentials and both routes return a bearer `token` recorded in the `sessions` table. `POST /api/auth/logout` deletes the session row for the given token. `AppShell.tsx` calls these routes instead of managing accounts in `localStorage`; the active session (`isAuthenticated`, username, token) lives in `sessionStorage`, so it resets on new window/refresh, and the token is sent as `Authorization: Bearer <token>` on the chat-session-start and logout calls.
+
+Known gap: `GET/PUT /api/board/{username}` and the `/api/chat/{username}/*` routes still trust the `username` path parameter as-is with no token verification — the session token is not yet enforced on those routes. Enforcing it (checking the bearer token's username matches the path username) is planned follow-up work; see `docs/PLAN.md`.
 
 **Environment**
 
