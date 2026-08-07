@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import AbstractAsyncContextManager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -55,19 +56,19 @@ class OpenRouterClient:
             "Content-Type": "application/json",
         }
 
-        if self.http_client is not None:
-            response = await self.http_client.post(
+        # An injected client is owned by the caller, so it must outlive this
+        # request; a client we create here is closed when the block exits.
+        client_scope: AbstractAsyncContextManager[httpx.AsyncClient] = (
+            nullcontext(self.http_client)
+            if self.http_client is not None
+            else httpx.AsyncClient(timeout=30.0)
+        )
+        async with client_scope as client:
+            response = await client.post(
                 OPENROUTER_API_URL,
                 headers=headers,
                 json=payload,
             )
-        else:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    OPENROUTER_API_URL,
-                    headers=headers,
-                    json=payload,
-                )
 
         if response.status_code >= 400:
             raise OpenRouterRequestError("OpenRouter request failed.")
@@ -101,11 +102,11 @@ def build_chat_messages(
         "The board must remain valid: column ids unique, each referenced card must exist, "
         "each card appears in exactly one column, and each card key must match its id."
     )
-    board_context = {
-        "role": "system",
-        "content": f"Current board JSON: {json_dumps(board_json)}",
-    }
-    return [{"role": "system", "content": system_prompt}, board_context, *history]
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": f"Current board JSON: {json_dumps(board_json)}"},
+        *history,
+    ]
 
 
 def json_dumps(value: Any) -> str:

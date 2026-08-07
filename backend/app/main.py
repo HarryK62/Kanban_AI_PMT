@@ -1,9 +1,9 @@
-from pathlib import Path
 import json
+from pathlib import Path
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.ai import (
@@ -13,9 +13,10 @@ from app.ai import (
     OpenRouterRequestError,
     build_chat_messages,
 )
-from app.auth import InvalidUsernameError, WeakPasswordError
+from app.auth import InvalidUsernameError, WeakPasswordError, normalize_username
 from app.models import (
-  AiBoardUpdate,
+    AiBoardUpdate,
+    AiTestResponse,
     AuthResponse,
     Board,
     BoardRecord,
@@ -38,20 +39,33 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
 DEFAULT_DB_PATH = ROOT_DIR / "backend" / "data" / "app.db"
 
-
-class AiTestResponse(BaseModel):
-    model: str
-    reply: str
+MALFORMED_AI_REPLY_DETAIL = "AI response was malformed."
 
 
 def _extract_bearer_token(authorization: str | None) -> str | None:
-    if authorization is None:
+    if authorization is None or not authorization.startswith("Bearer "):
         return None
-    prefix = "Bearer "
-    if not authorization.startswith(prefix):
-        return None
-    token = authorization[len(prefix):].strip()
-    return token or None
+    return authorization.removeprefix("Bearer ").strip() or None
+
+
+def _parse_ai_reply(raw_reply: str) -> tuple[str, Any]:
+    """Split a raw AI response into its reply text and board_update payload.
+
+    Raises a 502 if the response is not JSON of the expected shape, or if the
+    reply text is blank. The board_update payload is returned unvalidated --
+    callers validate it against AiBoardUpdate before persisting anything.
+    """
+    try:
+        parsed_reply = json.loads(raw_reply)
+        reply_text = parsed_reply["reply"].strip()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=502, detail=MALFORMED_AI_REPLY_DETAIL
+        ) from None
+
+    if not reply_text:
+        raise HTTPException(status_code=502, detail=MALFORMED_AI_REPLY_DETAIL)
+    return reply_text, parsed_reply.get("board_update")
 
 
 def placeholder_html() -> str:
@@ -179,6 +193,25 @@ def create_app(
     repository = BoardRepository(db_path or DEFAULT_DB_PATH)
     repository.initialize()
 
+    @app.exception_handler(BoardNotFoundError)
+    async def handle_board_not_found(
+        _request: Request, error: BoardNotFoundError
+    ) -> JSONResponse:
+        """A board that is missing *or* owned by someone else is a 404.
+
+        Answering 404 rather than 403 keeps the routes from revealing that
+        another user's board id exists.
+        """
+        return JSONResponse(status_code=404, content={"detail": str(error)})
+
+    def board_record(username: str, board_id: int, state_id: int, board: Board) -> BoardRecord:
+        return BoardRecord(
+            username=username,
+            board_id=board_id,
+            current_board_state_id=state_id,
+            board=board,
+        )
+
     @app.get("/api/hello")
     async def read_hello() -> dict[str, str]:
         return {"message": "hello from fastapi"}
@@ -192,10 +225,9 @@ def create_app(
         except UsernameTakenError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
-        token = repository.create_session(user_id)
-        username = repository.get_username_for_token(token) or ""
+        username = normalize_username(payload.username)
         repository.bootstrap_default_board(username)
-        return AuthResponse(username=username, token=token)
+        return AuthResponse(username=username, token=repository.create_session(user_id))
 
     @app.post("/api/auth/login", response_model=AuthResponse)
     async def login(payload: LoginRequest) -> AuthResponse:
@@ -204,8 +236,10 @@ def create_app(
         except InvalidCredentialsError as error:
             raise HTTPException(status_code=401, detail=str(error)) from None
 
-        token = repository.create_session(user_id)
-        return AuthResponse(username=repository.get_username_for_token(token) or "", token=token)
+        return AuthResponse(
+            username=normalize_username(payload.username),
+            token=repository.create_session(user_id),
+        )
 
     @app.post("/api/auth/logout", status_code=204)
     async def logout(authorization: str | None = Header(default=None)) -> None:
@@ -237,15 +271,8 @@ def create_app(
         payload: CreateBoardRequest,
         _authenticated_username: str = Depends(require_session),
     ) -> BoardRecord:
-        board_id, current_board_state_id, board = repository.create_board(
-            username, payload.title
-        )
-        return BoardRecord(
-            username=username,
-            board_id=board_id,
-            current_board_state_id=current_board_state_id,
-            board=board,
-        )
+        board_id, state_id, board = repository.create_board(username, payload.title)
+        return board_record(username, board_id, state_id, board)
 
     @app.get("/api/boards/{username}/{board_id}", response_model=BoardRecord)
     async def read_board(
@@ -253,16 +280,8 @@ def create_app(
         board_id: int,
         _authenticated_username: str = Depends(require_session),
     ) -> BoardRecord:
-        try:
-            current_board_state_id, board = repository.get_board(username, board_id)
-        except BoardNotFoundError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from None
-        return BoardRecord(
-            username=username,
-            board_id=board_id,
-            current_board_state_id=current_board_state_id,
-            board=board,
-        )
+        state_id, board = repository.get_board(username, board_id)
+        return board_record(username, board_id, state_id, board)
 
     @app.put("/api/boards/{username}/{board_id}", response_model=BoardRecord)
     async def update_board(
@@ -271,18 +290,8 @@ def create_app(
         board: Board,
         _authenticated_username: str = Depends(require_session),
     ) -> BoardRecord:
-        try:
-            current_board_state_id, saved_board = repository.replace_board(
-                username, board_id, board
-            )
-        except BoardNotFoundError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from None
-        return BoardRecord(
-            username=username,
-            board_id=board_id,
-            current_board_state_id=current_board_state_id,
-            board=saved_board,
-        )
+        state_id, saved_board = repository.replace_board(username, board_id, board)
+        return board_record(username, board_id, state_id, saved_board)
 
     @app.delete("/api/boards/{username}/{board_id}", status_code=204)
     async def delete_board(
@@ -290,10 +299,7 @@ def create_app(
         board_id: int,
         _authenticated_username: str = Depends(require_session),
     ) -> None:
-        try:
-            repository.delete_board(username, board_id)
-        except BoardNotFoundError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from None
+        repository.delete_board(username, board_id)
 
     @app.post("/api/chat/{username}/{board_id}/messages", response_model=ChatReply)
     async def create_chat_message(
@@ -302,10 +308,7 @@ def create_app(
         chat_message: ChatMessageCreate,
         _authenticated_username: str = Depends(require_session),
     ) -> ChatReply:
-        try:
-            current_board_state_id, board = repository.get_board(username, board_id)
-        except BoardNotFoundError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from None
+        current_board_state_id, board = repository.get_board(username, board_id)
         user_content = chat_message.message.strip()
 
         history = repository.list_chat_history(username, board_id)
@@ -322,16 +325,9 @@ def create_app(
         except OpenRouterRequestError as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
 
-        try:
-          parsed_reply = json.loads(raw_reply)
-          reply_text = parsed_reply["reply"].strip()
-          if not reply_text:
-            raise ValueError("Reply must not be blank.")
-        except (json.JSONDecodeError, KeyError, AttributeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=502,
-                detail="AI response was malformed.",
-            ) from None
+        # Parse before persisting anything: a malformed reply must not leave the
+        # user message behind to be replayed as unanswered context next turn.
+        reply_text, board_update_payload = _parse_ai_reply(raw_reply)
 
         chat_id, _ = repository.append_chat_message(
             username=username,
@@ -343,25 +339,22 @@ def create_app(
 
         next_board_state_id = current_board_state_id
         next_board = board
-        board_update_payload = parsed_reply.get("board_update")
         if board_update_payload is not None:
-          try:
-            board_update = AiBoardUpdate.model_validate(board_update_payload)
-            next_board_state_id, next_board = repository.replace_board(
-              username,
-              board_id,
-              board_update.board,
-            )
-          except Exception:
-            # Keep the assistant reply even if the board mutation is invalid.
-            next_board_state_id = current_board_state_id
-            next_board = board
+            try:
+                board_update = AiBoardUpdate.model_validate(board_update_payload)
+                next_board_state_id, next_board = repository.replace_board(
+                    username, board_id, board_update.board
+                )
+            except Exception:
+                # Keep the assistant reply even if the board mutation is invalid;
+                # the board simply stays on its current state.
+                pass
 
         _, assistant_message = repository.append_chat_message(
             username=username,
             board_id=board_id,
             role="assistant",
-          content=reply_text,
+            content=reply_text,
             board_state_id=next_board_state_id,
         )
         return ChatReply(
@@ -377,11 +370,7 @@ def create_app(
         board_id: int,
         _authenticated_username: str = Depends(require_session),
     ) -> ChatSessionRecord:
-        try:
-            chat_id = repository.reset_chat_session(username, board_id)
-        except BoardNotFoundError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from None
-        return ChatSessionRecord(chat_id=chat_id)
+        return ChatSessionRecord(chat_id=repository.reset_chat_session(username, board_id))
 
     @app.post("/api/ai/test", response_model=AiTestResponse)
     async def ai_connectivity_test() -> AiTestResponse:

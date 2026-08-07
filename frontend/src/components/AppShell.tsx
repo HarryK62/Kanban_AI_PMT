@@ -1,11 +1,26 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { BackgroundGlow } from "@/components/BackgroundGlow";
 import { KanbanBoard } from "@/components/KanbanBoard";
 
 const AUTHENTICATED_SESSION_KEY = "pm:isAuthenticated";
 const AUTHENTICATED_USERNAME_SESSION_KEY = "pm:authenticatedUsername";
 const AUTH_TOKEN_SESSION_KEY = "pm:authToken";
+
+// Mirrors the backend's USERNAME_PATTERN so the form can fail fast; the
+// backend remains the authority and re-validates every signup.
+const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/i;
+const USERNAME_REQUIREMENTS_MESSAGE =
+  "Username must be 3-32 characters and can include letters, numbers, dots, hyphens, or underscores.";
+
+const PASSWORD_RULES = [
+  { key: "minLength", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "lowercase", label: "One lowercase letter" },
+  { key: "number", label: "One number" },
+  { key: "symbol", label: "One symbol" },
+] as const;
 
 const normalizeUsername = (value: string) => value.trim().toLowerCase();
 
@@ -24,7 +39,7 @@ const parseErrorDetail = async (response: Response): Promise<string> => {
 };
 
 const getPasswordChecks = (password: string) => {
-  const checks = {
+  const checks: Record<(typeof PASSWORD_RULES)[number]["key"], boolean> = {
     minLength: password.length >= 8,
     uppercase: /[A-Z]/.test(password),
     lowercase: /[a-z]/.test(password),
@@ -33,8 +48,7 @@ const getPasswordChecks = (password: string) => {
   };
 
   const score = Object.values(checks).filter(Boolean).length;
-  const isStrong = score === 5;
-  return { checks, score, isStrong };
+  return { checks, score, isStrong: score === PASSWORD_RULES.length };
 };
 
 const getPasswordStrengthLabel = (score: number) => {
@@ -46,6 +60,25 @@ const getPasswordStrengthLabel = (score: number) => {
   }
   return "Strong";
 };
+
+const storeSession = (username: string, token: string) => {
+  window.sessionStorage.setItem(AUTHENTICATED_SESSION_KEY, "true");
+  window.sessionStorage.setItem(AUTHENTICATED_USERNAME_SESSION_KEY, username);
+  window.sessionStorage.setItem(AUTH_TOKEN_SESSION_KEY, token);
+};
+
+const clearStoredSession = () => {
+  window.sessionStorage.removeItem(AUTHENTICATED_SESSION_KEY);
+  window.sessionStorage.removeItem(AUTHENTICATED_USERNAME_SESSION_KEY);
+  window.sessionStorage.removeItem(AUTH_TOKEN_SESSION_KEY);
+};
+
+const postJson = (url: string, body: unknown) =>
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
 export const AppShell = () => {
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
@@ -78,6 +111,81 @@ export const AppShell = () => {
     setIsRestoringSession(false);
   }, []);
 
+  const handleSignup = async (normalizedUsername: string) => {
+    if (!USERNAME_PATTERN.test(normalizedUsername)) {
+      setErrorMessage(USERNAME_REQUIREMENTS_MESSAGE);
+      return;
+    }
+
+    if (!passwordStrength.isStrong) {
+      setErrorMessage("Use a stronger password that passes all checks below.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setErrorMessage("Password confirmation does not match.");
+      return;
+    }
+
+    setIsStartingSession(true);
+    try {
+      const response = await postJson("/api/auth/signup", {
+        username: normalizedUsername,
+        password,
+      });
+
+      if (response.status === 409) {
+        setErrorMessage("That username already exists. Please sign in.");
+        return;
+      }
+
+      if (!response.ok) {
+        const detail = await parseErrorDetail(response);
+        setErrorMessage(detail || "Unable to create your account right now.");
+        return;
+      }
+
+      setAuthMode("signin");
+      setPassword("");
+      setConfirmPassword("");
+      setSuccessMessage("Account created. You can sign in now.");
+    } catch {
+      setErrorMessage("Unable to reach the server right now.");
+    } finally {
+      setIsStartingSession(false);
+    }
+  };
+
+  const handleSignin = async (normalizedUsername: string) => {
+    setIsStartingSession(true);
+    try {
+      const response = await postJson("/api/auth/login", {
+        username: normalizedUsername,
+        password,
+      });
+
+      if (!response.ok) {
+        setErrorMessage("Invalid username or password.");
+        return;
+      }
+
+      const { username: loggedInUsername, token } =
+        (await response.json()) as AuthResponse;
+
+      setIsAuthenticated(true);
+      setAuthenticatedUsername(loggedInUsername);
+      setAuthToken(token);
+      storeSession(loggedInUsername, token);
+      setSessionKey((currentKey) => currentKey + 1);
+      setPassword("");
+      setConfirmPassword("");
+    } catch {
+      setErrorMessage("Unable to start your session right now.");
+    } finally {
+      setIsStartingSession(false);
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedUsername = normalizeUsername(username);
@@ -91,89 +199,9 @@ export const AppShell = () => {
     setSuccessMessage("");
 
     if (authMode === "signup") {
-      if (!/^[a-z0-9._-]{3,32}$/i.test(normalizedUsername)) {
-        setErrorMessage(
-          "Username must be 3-32 characters and can include letters, numbers, dots, hyphens, or underscores."
-        );
-        return;
-      }
-
-      if (!passwordStrength.isStrong) {
-        setErrorMessage(
-          "Use a stronger password that passes all checks below."
-        );
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setErrorMessage("Password confirmation does not match.");
-        return;
-      }
-
-      setIsStartingSession(true);
-      try {
-        const response = await fetch("/api/auth/signup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: normalizedUsername, password }),
-        });
-
-        if (response.status === 409) {
-          setErrorMessage("That username already exists. Please sign in.");
-          return;
-        }
-
-        if (!response.ok) {
-          const detail = await parseErrorDetail(response);
-          setErrorMessage(detail || "Unable to create your account right now.");
-          return;
-        }
-
-        setAuthMode("signin");
-        setPassword("");
-        setConfirmPassword("");
-        setSuccessMessage("Account created. You can sign in now.");
-      } catch {
-        setErrorMessage("Unable to reach the server right now.");
-      } finally {
-        setIsStartingSession(false);
-      }
-      return;
-    }
-
-    setIsStartingSession(true);
-
-    try {
-      const loginResponse = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: normalizedUsername, password }),
-      });
-
-      if (!loginResponse.ok) {
-        setErrorMessage("Invalid username or password.");
-        return;
-      }
-
-      const { username: loggedInUsername, token } =
-        (await loginResponse.json()) as AuthResponse;
-
-      setIsAuthenticated(true);
-      setAuthenticatedUsername(loggedInUsername);
-      setAuthToken(token);
-      window.sessionStorage.setItem(AUTHENTICATED_SESSION_KEY, "true");
-      window.sessionStorage.setItem(
-        AUTHENTICATED_USERNAME_SESSION_KEY,
-        loggedInUsername
-      );
-      window.sessionStorage.setItem(AUTH_TOKEN_SESSION_KEY, token);
-      setSessionKey((currentKey) => currentKey + 1);
-      setPassword("");
-      setConfirmPassword("");
-    } catch {
-      setErrorMessage("Unable to start your session right now.");
-    } finally {
-      setIsStartingSession(false);
+      await handleSignup(normalizedUsername);
+    } else {
+      await handleSignin(normalizedUsername);
     }
   };
 
@@ -187,9 +215,7 @@ export const AppShell = () => {
       });
     }
 
-    window.sessionStorage.removeItem(AUTHENTICATED_SESSION_KEY);
-    window.sessionStorage.removeItem(AUTHENTICATED_USERNAME_SESSION_KEY);
-    window.sessionStorage.removeItem(AUTH_TOKEN_SESSION_KEY);
+    clearStoredSession();
     setIsAuthenticated(false);
     setAuthenticatedUsername("");
     setAuthToken("");
@@ -205,6 +231,10 @@ export const AppShell = () => {
     return null;
   }
 
+  const primaryActionLabel =
+    authMode === "signin" ? "Sign in" : "Create account";
+  const submitLabel = isStartingSession ? "Opening board..." : primaryActionLabel;
+
   return (
     <div className="relative">
       {isAuthenticated ? (
@@ -216,8 +246,7 @@ export const AppShell = () => {
         />
       ) : (
         <div className="relative overflow-hidden">
-          <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
-          <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
+          <BackgroundGlow />
 
           <main className="relative mx-auto flex min-h-screen max-w-[560px] items-center px-6 py-12">
             <form
@@ -296,11 +325,12 @@ export const AppShell = () => {
                         Password strength: {getPasswordStrengthLabel(passwordStrength.score)}
                       </p>
                       <ul className="mt-2 space-y-1 text-[var(--gray-text)]">
-                        <li>{passwordStrength.checks.minLength ? "[x]" : "[ ]"} At least 8 characters</li>
-                        <li>{passwordStrength.checks.uppercase ? "[x]" : "[ ]"} One uppercase letter</li>
-                        <li>{passwordStrength.checks.lowercase ? "[x]" : "[ ]"} One lowercase letter</li>
-                        <li>{passwordStrength.checks.number ? "[x]" : "[ ]"} One number</li>
-                        <li>{passwordStrength.checks.symbol ? "[x]" : "[ ]"} One symbol</li>
+                        {PASSWORD_RULES.map((rule) => (
+                          <li key={rule.key}>
+                            {passwordStrength.checks[rule.key] ? "[x]" : "[ ]"}{" "}
+                            {rule.label}
+                          </li>
+                        ))}
                       </ul>
                     </div>
                   </>
@@ -327,11 +357,7 @@ export const AppShell = () => {
                 disabled={isStartingSession}
                 className="mt-6 w-full rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isStartingSession
-                  ? "Opening board..."
-                  : authMode === "signin"
-                    ? "Sign in"
-                    : "Create account"}
+                {submitLabel}
               </button>
               <button
                 type="button"

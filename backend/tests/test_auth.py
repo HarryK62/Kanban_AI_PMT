@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.repository import BoardRepository
 
 
 def make_client(tmp_path: Path) -> TestClient:
@@ -164,8 +165,6 @@ def test_logout_invalidates_the_session_token(tmp_path: Path) -> None:
         json={"username": "harry", "password": "kijanka"},
     )
     token = login_response.json()["token"]
-
-    from app.repository import BoardRepository
 
     repository = BoardRepository(tmp_path / "app.db")
     assert repository.get_username_for_token(token) == "harry"

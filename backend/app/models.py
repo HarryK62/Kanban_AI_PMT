@@ -114,6 +114,11 @@ class AiStructuredReply(BaseModel):
     board_update: AiBoardUpdate | None = None
 
 
+class AiTestResponse(BaseModel):
+    model: str
+    reply: str
+
+
 class SignupRequest(BaseModel):
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)

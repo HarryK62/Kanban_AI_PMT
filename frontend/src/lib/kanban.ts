@@ -75,15 +75,25 @@ export const initialData: BoardData = {
   },
 };
 
-const isColumnId = (columns: Column[], id: string) =>
+const isColumnId = (columns: Column[], id: string): boolean =>
   columns.some((column) => column.id === id);
 
-const findColumnId = (columns: Column[], id: string) => {
+/** Resolve a drag id -- which may be a column or a card -- to its column id. */
+const findColumnId = (columns: Column[], id: string): string | undefined => {
   if (isColumnId(columns, id)) {
     return id;
   }
   return columns.find((column) => column.cardIds.includes(id))?.id;
 };
+
+const withCardIds = (
+  columns: Column[],
+  columnId: string,
+  cardIds: string[]
+): Column[] =>
+  columns.map((column) =>
+    column.id === columnId ? { ...column, cardIds } : column
+  );
 
 export const moveCard = (
   columns: Column[],
@@ -104,19 +114,15 @@ export const moveCard = (
     return columns;
   }
 
+  // Dropping onto a column (rather than onto a card) appends to its end.
   const isOverColumn = isColumnId(columns, overId);
 
   if (activeColumnId === overColumnId) {
     if (isOverColumn) {
-      const nextCardIds = activeColumn.cardIds.filter(
+      const remaining = activeColumn.cardIds.filter(
         (cardId) => cardId !== activeId
       );
-      nextCardIds.push(activeId);
-      return columns.map((column) =>
-        column.id === activeColumnId
-          ? { ...column, cardIds: nextCardIds }
-          : column
-      );
+      return withCardIds(columns, activeColumnId, [...remaining, activeId]);
     }
 
     const oldIndex = activeColumn.cardIds.indexOf(activeId);
@@ -130,11 +136,7 @@ export const moveCard = (
     nextCardIds.splice(oldIndex, 1);
     nextCardIds.splice(newIndex, 0, activeId);
 
-    return columns.map((column) =>
-      column.id === activeColumnId
-        ? { ...column, cardIds: nextCardIds }
-        : column
-    );
+    return withCardIds(columns, activeColumnId, nextCardIds);
   }
 
   const activeIndex = activeColumn.cardIds.indexOf(activeId);
@@ -145,27 +147,20 @@ export const moveCard = (
   const nextActiveCardIds = [...activeColumn.cardIds];
   nextActiveCardIds.splice(activeIndex, 1);
 
+  const overIndex = overColumn.cardIds.indexOf(overId);
+  const insertIndex =
+    isOverColumn || overIndex === -1 ? overColumn.cardIds.length : overIndex;
   const nextOverCardIds = [...overColumn.cardIds];
-  if (isOverColumn) {
-    nextOverCardIds.push(activeId);
-  } else {
-    const overIndex = overColumn.cardIds.indexOf(overId);
-    const insertIndex = overIndex === -1 ? nextOverCardIds.length : overIndex;
-    nextOverCardIds.splice(insertIndex, 0, activeId);
-  }
+  nextOverCardIds.splice(insertIndex, 0, activeId);
 
-  return columns.map((column) => {
-    if (column.id === activeColumnId) {
-      return { ...column, cardIds: nextActiveCardIds };
-    }
-    if (column.id === overColumnId) {
-      return { ...column, cardIds: nextOverCardIds };
-    }
-    return column;
-  });
+  return withCardIds(
+    withCardIds(columns, activeColumnId, nextActiveCardIds),
+    overColumnId,
+    nextOverCardIds
+  );
 };
 
-export const createId = (prefix: string) => {
+export const createId = (prefix: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 8);
   const timePart = Date.now().toString(36);
   return `${prefix}-${randomPart}${timePart}`;

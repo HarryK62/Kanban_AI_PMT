@@ -10,6 +10,7 @@ from app.repository import default_board
 
 
 AUTH_PASSWORD = "Str0ngPass!1"
+MISSING_FRONTEND_DIR = Path("/tmp/does-not-exist")
 
 
 class FakeAiClient:
@@ -22,6 +23,17 @@ class FakeAiClient:
         return self.reply
 
 
+def make_client(tmp_path: Path, ai_client: FakeAiClient | None = None) -> TestClient:
+    """Build a TestClient backed by a throwaway database in tmp_path."""
+    return TestClient(
+        create_app(
+            frontend_out_dir=MISSING_FRONTEND_DIR,
+            db_path=tmp_path / "app.db",
+            ai_client=ai_client,
+        )
+    )
+
+
 def signup(
     client: TestClient, username: str, password: str = AUTH_PASSWORD
 ) -> dict[str, str]:
@@ -32,15 +44,6 @@ def signup(
     assert response.status_code == 201, response.text
     token = response.json()["token"]
     return {"Authorization": f"Bearer {token}"}
-
-
-def signup_with_board_id(
-    client: TestClient, username: str, password: str = AUTH_PASSWORD
-) -> tuple[dict[str, str], int]:
-    headers = signup(client, username, password)
-    boards = client.get(f"/api/boards/{username}", headers=headers).json()
-    assert len(boards) == 1
-    return headers, boards[0]["board_id"]
 
 
 def signup_with_board(
@@ -59,7 +62,7 @@ def signup_with_board(
 
 
 def test_root_serves_html_placeholder() -> None:
-    client = TestClient(create_app(frontend_out_dir=Path("/tmp/does-not-exist")))
+    client = TestClient(create_app(frontend_out_dir=MISSING_FRONTEND_DIR))
     response = client.get("/")
 
     assert response.status_code == 200
@@ -68,7 +71,7 @@ def test_root_serves_html_placeholder() -> None:
 
 
 def test_api_hello_returns_message() -> None:
-    client = TestClient(create_app(frontend_out_dir=Path("/tmp/does-not-exist")))
+    client = TestClient(create_app(frontend_out_dir=MISSING_FRONTEND_DIR))
     response = client.get("/api/hello")
 
     assert response.status_code == 200
@@ -91,10 +94,7 @@ def test_root_serves_static_frontend_when_built(tmp_path: Path) -> None:
 
 
 def test_signup_bootstraps_a_default_board(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers = signup(client, "user")
 
     response = client.get("/api/boards/user", headers=headers)
@@ -107,10 +107,7 @@ def test_signup_bootstraps_a_default_board(tmp_path: Path) -> None:
 
 
 def test_list_boards_requires_authentication(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
 
     response = client.get("/api/boards/user")
 
@@ -118,11 +115,8 @@ def test_list_boards_requires_authentication(tmp_path: Path) -> None:
 
 
 def test_create_board_adds_a_second_board(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    headers, first_board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path)
+    headers, first_board_id, _ = signup_with_board(client, "user")
 
     response = client.post(
         "/api/boards/user", json={"title": "Marketing"}, headers=headers
@@ -140,10 +134,7 @@ def test_create_board_adds_a_second_board(tmp_path: Path) -> None:
 
 
 def test_create_board_defaults_title_when_omitted(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers = signup(client, "user")
 
     response = client.post("/api/boards/user", json={}, headers=headers)
@@ -153,10 +144,7 @@ def test_create_board_defaults_title_when_omitted(tmp_path: Path) -> None:
 
 
 def test_get_board_returns_the_requested_board(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     response = client.get(f"/api/boards/user/{board_id}", headers=headers)
@@ -171,10 +159,7 @@ def test_get_board_returns_the_requested_board(tmp_path: Path) -> None:
 
 
 def test_get_board_returns_404_for_unknown_board_id(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers = signup(client, "user")
 
     response = client.get("/api/boards/user/999999", headers=headers)
@@ -183,11 +168,8 @@ def test_get_board_returns_404_for_unknown_board_id(tmp_path: Path) -> None:
 
 
 def test_board_route_rejects_a_token_for_a_different_username(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    alice_headers, alice_board_id = signup_with_board_id(client, "alice")
+    client = make_client(tmp_path)
+    alice_headers, alice_board_id, _ = signup_with_board(client, "alice")
     bob_headers = signup(client, "bob")
 
     response = client.get(f"/api/boards/alice/{alice_board_id}", headers=bob_headers)
@@ -196,12 +178,9 @@ def test_board_route_rejects_a_token_for_a_different_username(tmp_path: Path) ->
 
 
 def test_get_board_returns_404_for_a_board_id_owned_by_another_user(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    _, bob_board_id = signup_with_board_id(client, "bob")
-    alice_headers, _ = signup_with_board_id(client, "alice")
+    client = make_client(tmp_path)
+    _, bob_board_id, _ = signup_with_board(client, "bob")
+    alice_headers, _, _ = signup_with_board(client, "alice")
 
     # alice is properly authenticated as herself, but asks for a board id
     # that belongs to bob -- the mismatch must surface as "not found", not
@@ -213,9 +192,7 @@ def test_get_board_returns_404_for_a_board_id_owned_by_another_user(tmp_path: Pa
 
 def test_board_replace_updates_persisted_board(tmp_path: Path) -> None:
     db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     board_payload = default_board().model_dump(by_alias=True)
@@ -257,11 +234,8 @@ def test_board_replace_updates_persisted_board(tmp_path: Path) -> None:
 
 
 def test_board_replace_rejects_invalid_payload(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    headers, board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path)
+    headers, board_id, _ = signup_with_board(client, "user")
 
     board_payload = default_board().model_dump(by_alias=True)
     board_payload["columns"][0]["cardIds"].append("missing-card")
@@ -274,11 +248,8 @@ def test_board_replace_rejects_invalid_payload(tmp_path: Path) -> None:
 
 
 def test_board_replace_rejects_missing_fixed_columns(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    headers, board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path)
+    headers, board_id, _ = signup_with_board(client, "user")
 
     board_payload = default_board().model_dump(by_alias=True)
     board_payload["columns"] = board_payload["columns"][:1]
@@ -291,11 +262,8 @@ def test_board_replace_rejects_missing_fixed_columns(tmp_path: Path) -> None:
 
 
 def test_delete_board_removes_it_from_the_list(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    headers, board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path)
+    headers, board_id, _ = signup_with_board(client, "user")
     second_board_id = client.post(
         "/api/boards/user", json={"title": "Second"}, headers=headers
     ).json()["board_id"]
@@ -308,10 +276,7 @@ def test_delete_board_removes_it_from_the_list(tmp_path: Path) -> None:
 
 
 def test_delete_board_returns_404_for_unknown_board(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers = signup(client, "user")
 
     response = client.delete("/api/boards/user/999999", headers=headers)
@@ -320,10 +285,7 @@ def test_delete_board_returns_404_for_unknown_board(tmp_path: Path) -> None:
 
 
 def test_chat_message_route_requires_authentication(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
 
     response = client.post(
         "/api/chat/user/1/messages", json={"message": "Hello."}
@@ -333,11 +295,8 @@ def test_chat_message_route_requires_authentication(tmp_path: Path) -> None:
 
 
 def test_chat_message_route_rejects_invalid_payload(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
-    headers, board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path)
+    headers, board_id, _ = signup_with_board(client, "user")
 
     response = client.post(
         f"/api/chat/user/{board_id}/messages", json={}, headers=headers
@@ -347,10 +306,7 @@ def test_chat_message_route_rejects_invalid_payload(tmp_path: Path) -> None:
 
 
 def test_chat_message_route_returns_404_for_unknown_board(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
     headers = signup(client, "user")
 
     response = client.post(
@@ -363,15 +319,8 @@ def test_chat_message_route_returns_404_for_unknown_board(tmp_path: Path) -> Non
 
 
 def test_chat_message_route_returns_no_op_reply(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
     ai_client = FakeAiClient('{"reply":"Done.","board_update":null}')
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=ai_client,
-        )
-    )
+    client = make_client(tmp_path, ai_client)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     response = client.post(
@@ -402,16 +351,9 @@ def test_chat_message_route_returns_no_op_reply(tmp_path: Path) -> None:
 def test_chat_history_is_isolated_between_two_boards_of_the_same_user(
     tmp_path: Path,
 ) -> None:
-    db_path = tmp_path / "app.db"
     first_ai_client = FakeAiClient('{"reply":"Noted on board one.","board_update":null}')
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=first_ai_client,
-        )
-    )
-    headers, first_board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path, first_ai_client)
+    headers, first_board_id, _ = signup_with_board(client, "user")
     second_board_id = client.post(
         "/api/boards/user", json={"title": "Second"}, headers=headers
     ).json()["board_id"]
@@ -424,13 +366,7 @@ def test_chat_history_is_isolated_between_two_boards_of_the_same_user(
     assert first_response.status_code == 200
 
     second_ai_client = FakeAiClient('{"reply":"Noted on board two.","board_update":null}')
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=second_ai_client,
-        )
-    )
+    client = make_client(tmp_path, second_ai_client)
     second_response = client.post(
         f"/api/chat/user/{second_board_id}/messages",
         json={"message": "Second board message."},
@@ -447,16 +383,9 @@ def test_chat_history_is_isolated_between_two_boards_of_the_same_user(
 
 
 def test_chat_session_route_resets_existing_chat_context(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
     first_ai_client = FakeAiClient('{"reply":"Done.","board_update":null}')
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=first_ai_client,
-        )
-    )
-    headers, board_id = signup_with_board_id(client, "user")
+    client = make_client(tmp_path, first_ai_client)
+    headers, board_id, _ = signup_with_board(client, "user")
 
     first_response = client.post(
         f"/api/chat/user/{board_id}/messages",
@@ -473,13 +402,7 @@ def test_chat_session_route_resets_existing_chat_context(tmp_path: Path) -> None
     reset_chat_id = reset_response.json()["chat_id"]
 
     second_ai_client = FakeAiClient('{"reply":"Fresh context.","board_update":null}')
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=second_ai_client,
-        )
-    )
+    client = make_client(tmp_path, second_ai_client)
     second_response = client.post(
         f"/api/chat/user/{board_id}/messages",
         json={"message": "Second session message."},
@@ -514,13 +437,7 @@ def test_chat_message_route_persists_board_update(tmp_path: Path) -> None:
             }
         )
     )
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=ai_client,
-        )
-    )
+    client = make_client(tmp_path, ai_client)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     response = client.post(
@@ -555,7 +472,6 @@ def test_chat_message_route_persists_board_update(tmp_path: Path) -> None:
 
 
 def test_chat_message_route_rejects_ai_board_with_missing_fixed_columns(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.db"
     invalid_board = default_board().model_dump(by_alias=True)
     invalid_board["columns"] = invalid_board["columns"][:1]
     ai_client = FakeAiClient(
@@ -569,13 +485,7 @@ def test_chat_message_route_rejects_ai_board_with_missing_fixed_columns(tmp_path
             }
         )
     )
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=ai_client,
-        )
-    )
+    client = make_client(tmp_path, ai_client)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     response = client.post(
@@ -598,13 +508,7 @@ def test_chat_message_route_rejects_ai_board_with_missing_fixed_columns(tmp_path
 def test_chat_message_route_rejects_malformed_ai_reply(tmp_path: Path) -> None:
     db_path = tmp_path / "app.db"
     ai_client = FakeAiClient("not json")
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=ai_client,
-        )
-    )
+    client = make_client(tmp_path, ai_client)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     response = client.post(
@@ -646,13 +550,7 @@ def test_chat_message_route_rejects_invalid_board_update(tmp_path: Path) -> None
             }
         )
     )
-    client = TestClient(
-        create_app(
-            frontend_out_dir=Path("/tmp/does-not-exist"),
-            db_path=db_path,
-            ai_client=ai_client,
-        )
-    )
+    client = make_client(tmp_path, ai_client)
     headers, board_id, initial_state_id = signup_with_board(client, "user")
 
     response = client.post(
@@ -684,10 +582,7 @@ def test_chat_message_route_rejects_invalid_board_update(tmp_path: Path) -> None
 
 def test_ai_connectivity_route_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    db_path = tmp_path / "app.db"
-    client = TestClient(
-        create_app(frontend_out_dir=Path("/tmp/does-not-exist"), db_path=db_path)
-    )
+    client = make_client(tmp_path)
 
     response = client.post("/api/ai/test")
 

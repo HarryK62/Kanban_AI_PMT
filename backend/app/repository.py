@@ -350,18 +350,18 @@ class BoardRepository:
 
     def bootstrap_default_board(self, username: str) -> tuple[int, int, Board]:
         """Create the sample-filled starter board for a brand-new account."""
-        with self.connect() as connection:
-            user_id = self._get_user_id(connection, username)
-            board = default_board()
-            row = self._insert_new_board(connection, user_id, board)
-            return int(row["board_id"]), int(row["current_board_state_id"]), board
+        return self._add_board(username, default_board())
 
     def create_board(self, username: str, title: str | None = None) -> tuple[int, int, Board]:
+        """Create an additional, empty board for an existing account."""
+        board = empty_board(title.strip() if title and title.strip() else "New board")
+        return self._add_board(username, board)
+
+    def _add_board(self, username: str, board: Board) -> tuple[int, int, Board]:
         with self.connect() as connection:
             user_id = self._get_user_id(connection, username)
-            board = empty_board(title.strip() if title and title.strip() else "New board")
-            row = self._insert_new_board(connection, user_id, board)
-            return int(row["board_id"]), int(row["current_board_state_id"]), board
+            board_id, board_state_id = self._insert_new_board(connection, user_id, board)
+            return board_id, board_state_id, board
 
     def list_boards(self, username: str) -> list[BoardSummary]:
         with self.connect() as connection:
@@ -425,15 +425,7 @@ class BoardRepository:
             user_id = self._get_user_id(connection, username)
             self._get_owned_board_row(connection, user_id, board_id)
 
-            chat_row = connection.execute(
-                "SELECT id FROM chats WHERE board_id = ?", (board_id,)
-            ).fetchone()
-            if chat_row is not None:
-                connection.execute(
-                    "DELETE FROM chat_messages WHERE chat_id = ?", (chat_row["id"],)
-                )
-                connection.execute("DELETE FROM chats WHERE id = ?", (chat_row["id"],))
-
+            self._delete_chat_for_board(connection, board_id)
             connection.execute("DELETE FROM board_states WHERE board_id = ?", (board_id,))
             connection.execute("DELETE FROM boards WHERE id = ?", (board_id,))
 
@@ -462,7 +454,8 @@ class BoardRepository:
         user_id: int,
         board: Board,
         timestamp: str | None = None,
-    ) -> sqlite3.Row:
+    ) -> tuple[int, int]:
+        """Insert a board plus its first state, returning (board_id, state_id)."""
         created_at = timestamp or current_timestamp()
         board_cursor = connection.execute(
             """
@@ -487,13 +480,7 @@ class BoardRepository:
             """,
             (board_state_id, board_id),
         )
-        row = connection.execute(
-            "SELECT id AS board_id, current_board_state_id FROM boards WHERE id = ?",
-            (board_id,),
-        ).fetchone()
-        if row is None:
-            raise RuntimeError("Board creation failed to produce a current board state.")
-        return row
+        return board_id, board_state_id
 
     def _insert_board_state(
         self,
@@ -530,25 +517,8 @@ class BoardRepository:
             user_id = self._get_user_id(connection, username)
             self._get_owned_board_row(connection, user_id, board_id)
 
-            existing_chat_row = connection.execute(
-                "SELECT id FROM chats WHERE board_id = ?", (board_id,)
-            ).fetchone()
-            if existing_chat_row is not None:
-                existing_chat_id = int(existing_chat_row["id"])
-                connection.execute(
-                    "DELETE FROM chat_messages WHERE chat_id = ?", (existing_chat_id,)
-                )
-                connection.execute("DELETE FROM chats WHERE id = ?", (existing_chat_id,))
-
-            timestamp = current_timestamp()
-            cursor = connection.execute(
-                """
-                INSERT INTO chats (user_id, board_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (user_id, board_id, timestamp, timestamp),
-            )
-            return int(cursor.lastrowid)
+            self._delete_chat_for_board(connection, board_id)
+            return self._insert_chat(connection, user_id, board_id)
 
     def list_chat_history(self, username: str, board_id: int) -> list[dict[str, str]]:
         with self.connect() as connection:
@@ -576,14 +546,14 @@ class BoardRepository:
         with self.connect() as connection:
             user_id = self._get_user_id(connection, username)
             chat_id = self._get_or_create_chat_id(connection, user_id, board_id)
-            row = self._insert_chat_message(
+            message = self._insert_chat_message(
                 connection=connection,
                 chat_id=chat_id,
                 role=role,
                 content=content,
                 board_state_id=board_state_id,
             )
-            return chat_id, self._chat_message_from_row(row)
+            return chat_id, message
 
     def _get_or_create_chat_id(
         self, connection: sqlite3.Connection, user_id: int, board_id: int
@@ -595,7 +565,11 @@ class BoardRepository:
         ).fetchone()
         if row is not None:
             return int(row["id"])
+        return self._insert_chat(connection, user_id, board_id)
 
+    def _insert_chat(
+        self, connection: sqlite3.Connection, user_id: int, board_id: int
+    ) -> int:
         timestamp = current_timestamp()
         cursor = connection.execute(
             """
@@ -606,6 +580,20 @@ class BoardRepository:
         )
         return int(cursor.lastrowid)
 
+    def _delete_chat_for_board(
+        self, connection: sqlite3.Connection, board_id: int
+    ) -> None:
+        """Drop a board's chat and its messages, if a chat exists at all."""
+        row = connection.execute(
+            "SELECT id FROM chats WHERE board_id = ?", (board_id,)
+        ).fetchone()
+        if row is None:
+            return
+
+        chat_id = int(row["id"])
+        connection.execute("DELETE FROM chat_messages WHERE chat_id = ?", (chat_id,))
+        connection.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+
     def _insert_chat_message(
         self,
         connection: sqlite3.Connection,
@@ -613,8 +601,8 @@ class BoardRepository:
         role: str,
         content: str,
         board_state_id: int,
-    ) -> sqlite3.Row:
-        next_sequence_number = (
+    ) -> ChatMessageRecord:
+        next_sequence_number = int(
             connection.execute(
                 """
                 SELECT COALESCE(MAX(sequence_number), 0) + 1
@@ -640,22 +628,9 @@ class BoardRepository:
             """,
             (timestamp, chat_id),
         )
-        row = connection.execute(
-            """
-            SELECT id, sequence_number, role, content
-            FROM chat_messages
-            WHERE id = ?
-            """,
-            (int(cursor.lastrowid),),
-        ).fetchone()
-        if row is None:
-            raise RuntimeError("Chat message insert failed.")
-        return row
-
-    def _chat_message_from_row(self, row: sqlite3.Row) -> ChatMessageRecord:
         return ChatMessageRecord(
-            id=int(row["id"]),
-            sequence_number=int(row["sequence_number"]),
-            role=row["role"],
-            content=row["content"],
+            id=int(cursor.lastrowid),
+            sequence_number=next_sequence_number,
+            role=role,
+            content=content,
         )

@@ -12,6 +12,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { AiChatSidebar } from "@/components/AiChatSidebar";
+import { BackgroundGlow } from "@/components/BackgroundGlow";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { createId, initialData, moveCard, type BoardData, type Card } from "@/lib/kanban";
@@ -76,6 +77,11 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     [token]
   );
 
+  const jsonAuthHeaders = useMemo(
+    () => ({ "Content-Type": "application/json", ...authHeader }),
+    [authHeader]
+  );
+
   const handleUnauthorizedResponse = useCallback(
     (response: Response) => {
       if (response.status === 401) {
@@ -83,6 +89,17 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
       }
     },
     [onLogout]
+  );
+
+  /** Log out on a 401, then fail the caller's request on any non-OK status. */
+  const ensureResponseOk = useCallback(
+    (response: Response, failureMessage: string) => {
+      if (!response.ok) {
+        handleUnauthorizedResponse(response);
+        throw new Error(failureMessage);
+      }
+    },
+    [handleUnauthorizedResponse]
   );
 
   useEffect(() => {
@@ -96,10 +113,7 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
         const response = await fetch(`/api/boards/${username}`, {
           headers: authHeader,
         });
-        if (!response.ok) {
-          handleUnauthorizedResponse(response);
-          throw new Error("Unable to load boards.");
-        }
+        ensureResponseOk(response, "Unable to load boards.");
 
         const data = (await response.json()) as BoardSummary[];
         if (!isActive) {
@@ -127,7 +141,7 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     return () => {
       isActive = false;
     };
-  }, [username, authHeader, handleUnauthorizedResponse]);
+  }, [username, authHeader, ensureResponseOk]);
 
   useEffect(() => {
     if (activeBoardId === null) {
@@ -152,13 +166,10 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
           }),
         ]);
 
-        if (!sessionResponse.ok) {
-          handleUnauthorizedResponse(sessionResponse);
-        }
-        if (!boardResponse.ok) {
-          handleUnauthorizedResponse(boardResponse);
-          throw new Error("Unable to load board.");
-        }
+        // A failed chat reset is not fatal to viewing the board, but a stale
+        // token still has to end the session.
+        handleUnauthorizedResponse(sessionResponse);
+        ensureResponseOk(boardResponse, "Unable to load board.");
 
         const data = (await boardResponse.json()) as BoardResponse;
         if (isActive) {
@@ -181,7 +192,13 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     return () => {
       isActive = false;
     };
-  }, [username, activeBoardId, authHeader, handleUnauthorizedResponse]);
+  }, [
+    username,
+    activeBoardId,
+    authHeader,
+    handleUnauthorizedResponse,
+    ensureResponseOk,
+  ]);
 
   useEffect(() => {
     if (!isChatSubmitting) {
@@ -204,7 +221,6 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
   const saveGenerationRef = useRef(0);
   const pendingSaveCountRef = useRef(0);
   const renamePersistTimeoutRef = useRef<number | null>(null);
@@ -216,6 +232,13 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
       }
     };
   }, []);
+
+  const cancelPendingRenamePersist = () => {
+    if (renamePersistTimeoutRef.current !== null) {
+      window.clearTimeout(renamePersistTimeoutRef.current);
+      renamePersistTimeoutRef.current = null;
+    }
+  };
 
   const persistBoard = async (nextBoard: BoardData) => {
     if (activeBoardId === null) {
@@ -230,17 +253,10 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     try {
       const response = await fetch(`/api/boards/${username}/${activeBoardId}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeader,
-        },
+        headers: jsonAuthHeaders,
         body: JSON.stringify(nextBoard),
       });
-
-      if (!response.ok) {
-        handleUnauthorizedResponse(response);
-        throw new Error("Unable to save board.");
-      }
+      ensureResponseOk(response, "Unable to save board.");
 
       const data = (await response.json()) as BoardResponse;
       if (generation === saveGenerationRef.current) {
@@ -265,17 +281,18 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     }
   };
 
-  const updateBoard = (updater: (currentBoard: BoardData) => BoardData) => {
-    if (renamePersistTimeoutRef.current !== null) {
-      window.clearTimeout(renamePersistTimeoutRef.current);
-      renamePersistTimeoutRef.current = null;
-    }
-
-    const nextBoard = updater(board);
-    setBoard(nextBoard);
+  const savePersistedBoard = (nextBoard: BoardData) => {
     void persistBoard(nextBoard).catch(() => {
       setErrorMessage("Unable to save the latest board changes.");
     });
+  };
+
+  const updateBoard = (updater: (currentBoard: BoardData) => BoardData) => {
+    cancelPendingRenamePersist();
+
+    const nextBoard = updater(board);
+    setBoard(nextBoard);
+    savePersistedBoard(nextBoard);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -305,14 +322,11 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     };
     setBoard(nextBoard);
 
-    if (renamePersistTimeoutRef.current !== null) {
-      window.clearTimeout(renamePersistTimeoutRef.current);
-    }
+    // Typing in the title field fires per keystroke; only the last one saves.
+    cancelPendingRenamePersist();
     renamePersistTimeoutRef.current = window.setTimeout(() => {
       renamePersistTimeoutRef.current = null;
-      void persistBoard(nextBoard).catch(() => {
-        setErrorMessage("Unable to save the latest board changes.");
-      });
+      savePersistedBoard(nextBoard);
     }, RENAME_PERSIST_DEBOUNCE_MS);
   };
 
@@ -349,13 +363,6 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     }));
   };
 
-  const handleSelectBoard = (boardId: number) => {
-    if (boardId === activeBoardId) {
-      return;
-    }
-    setActiveBoardId(boardId);
-  };
-
   const handleCreateBoard = async () => {
     if (isCreatingBoard) {
       return;
@@ -372,17 +379,10 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     try {
       const response = await fetch(`/api/boards/${username}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeader,
-        },
+        headers: jsonAuthHeaders,
         body: JSON.stringify({ title: title.trim() || null }),
       });
-
-      if (!response.ok) {
-        handleUnauthorizedResponse(response);
-        throw new Error("Unable to create board.");
-      }
+      ensureResponseOk(response, "Unable to create board.");
 
       const data = (await response.json()) as BoardResponse;
       setBoards((current) => [
@@ -415,25 +415,19 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
         method: "DELETE",
         headers: authHeader,
       });
+      ensureResponseOk(response, "Unable to delete board.");
 
-      if (!response.ok) {
-        handleUnauthorizedResponse(response);
-        throw new Error("Unable to delete board.");
+      const remaining = boards.filter((summary) => summary.board_id !== boardId);
+      setBoards(remaining);
+      if (activeBoardId === boardId) {
+        setActiveBoardId(remaining[0]?.board_id ?? null);
       }
-
-      setBoards((current) => {
-        const next = current.filter((summary) => summary.board_id !== boardId);
-        if (activeBoardId === boardId) {
-          setActiveBoardId(next[0]?.board_id ?? null);
-        }
-        return next;
-      });
     } catch {
       setBoardsErrorMessage("Unable to delete that board right now.");
     }
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   const handleChatSubmit = async (message: string): Promise<boolean> => {
     if (isChatSubmitting || activeBoardId === null) {
@@ -449,31 +443,22 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
     setChatErrorMessage("");
     setIsChatSubmitting(true);
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => {
-        controller.abort();
-      }, CHAT_REQUEST_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      controller.abort();
+    }, CHAT_REQUEST_TIMEOUT_MS);
 
-      const response = await (async () => {
-        try {
-          return await fetch(`/api/chat/${username}/${activeBoardId}/messages`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...authHeader,
-            },
-            body: JSON.stringify({ message }),
-            signal: controller.signal,
-          });
-        } finally {
-          window.clearTimeout(timeoutId);
+    try {
+      const response = await fetch(
+        `/api/chat/${username}/${activeBoardId}/messages`,
+        {
+          method: "POST",
+          headers: jsonAuthHeaders,
+          body: JSON.stringify({ message }),
+          signal: controller.signal,
         }
-      })();
-      if (!response.ok) {
-        handleUnauthorizedResponse(response);
-        throw new Error("Unable to send chat message.");
-      }
+      );
+      ensureResponseOk(response, "Unable to send chat message.");
 
       const data = (await response.json()) as ChatReply;
       saveGenerationRef.current += 1;
@@ -487,14 +472,12 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
         },
       ]);
       return true;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setChatErrorMessage("Unable to reach the AI now.");
-      } else {
-        setChatErrorMessage("Unable to reach the AI now.");
-      }
+    } catch {
+      // A timeout abort and a failed request read the same way to the user.
+      setChatErrorMessage("Unable to reach the AI now.");
       return false;
     } finally {
+      window.clearTimeout(timeoutId);
       setIsChatSubmitting(false);
     }
   };
@@ -507,8 +490,7 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
 
   return (
     <div className="relative overflow-hidden">
-      <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
-      <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
+      <BackgroundGlow />
 
       <main className="relative mx-auto flex min-h-screen max-w-[1400px] flex-col gap-8 px-5 pb-12 pt-10">
         <header className="flex flex-col gap-5 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-7 shadow-[var(--shadow)] backdrop-blur">
@@ -585,7 +567,7 @@ export const KanbanBoard = ({ onLogout, username, token }: KanbanBoardProps) => 
                   type="button"
                   role="tab"
                   aria-selected={summary.board_id === activeBoardId}
-                  onClick={() => handleSelectBoard(summary.board_id)}
+                  onClick={() => setActiveBoardId(summary.board_id)}
                 >
                   {summary.title}
                 </button>
